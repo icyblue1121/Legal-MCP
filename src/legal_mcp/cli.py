@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from legal_mcp import __version__
@@ -29,6 +30,19 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_DATABASE_PATH,
         help=f"SQLite database path (default: {DEFAULT_DATABASE_PATH})",
     )
+    serve_parser = subparsers.add_parser("serve", help="Run the stdio MCP server")
+    serve_parser.add_argument(
+        "--db",
+        type=Path,
+        default=DEFAULT_DATABASE_PATH,
+        help=f"SQLite database path (default: {DEFAULT_DATABASE_PATH})",
+    )
+    serve_parser.add_argument(
+        "--audit-log",
+        type=Path,
+        default=Path.home() / ".legal-mcp" / "audit.jsonl",
+        help="Audit log JSONL path",
+    )
     return parser
 
 
@@ -39,6 +53,11 @@ def main(argv: list[str] | None = None) -> int:
         report = import_file(args.path, database_path=args.db)
         _print_import_report(report)
         return 1 if report.errors else 0
+    if args.command == "serve":
+        from legal_mcp.mcp_server import serve
+
+        serve(args.db, args.audit_log, sys.stdin.buffer, sys.stdout.buffer, sys.stderr)
+        return 0
 
     parser.print_help()
     return 0
