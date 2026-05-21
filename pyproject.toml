@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "legal-mcp"
+version = "0.1.0"
+description = "Local SQLite-backed MCP server for legal project context."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "Legal-MCP contributors" }
+]
+dependencies = []
+
+[project.scripts]
+legal-mcp = "legal_mcp.cli:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=8"
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+legal_mcp = ["schema.sql"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
