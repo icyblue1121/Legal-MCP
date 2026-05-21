@@ -1,0 +1,2 @@
+project_code,external_key,license_type,identifier,entity_name,issuer,approval_number,rights_holder,copyright_holder,operating_entity,actual_operator,authorization_relation,expiry_date,notes
+GAME-001,publication_license,publication_license,ISBN-EXAMPLE-001,Example Entity,Example Issuer,APPROVAL-001,Example Rights Holder,Example Copyright Holder,Example Operator,Example Actual Operator,Internal authorization,2026-12-31,Replace this row before importing real data

@@ -40,6 +40,10 @@ legal-mcp import path/to/projects.csv
 legal-mcp import path/to/project-ledger.xlsx
 ```
 
+For a real data trial, start from `data/import_templates/project_ledger.csv`,
+replace the example row with three to five real projects, then follow
+[Docs/real-data-trial.md](Docs/real-data-trial.md).
+
 Check install health, including database schema and an optional client config:
 
 ```sh

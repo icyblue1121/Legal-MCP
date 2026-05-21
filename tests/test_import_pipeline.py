@@ -280,3 +280,87 @@ def test_cli_import_uses_shared_pipeline(tmp_path, capsys) -> None:
         assert conn.execute("select count(*) from projects").fetchone()[0] == 1
     finally:
         conn.close()
+
+
+def test_cli_ledger_import_report_is_readable_for_real_data_trial(tmp_path, capsys) -> None:
+    source = tmp_path / "project_ledger.csv"
+    database_path = tmp_path / "legal.db"
+    write_csv(
+        source,
+        [
+            "项目代号",
+            "游戏名称",
+            "上线状态",
+            "版号",
+            "ICP备案号",
+            "风险预警",
+            "试跑备注",
+        ],
+        [
+            {
+                "项目代号": "GAME-001",
+                "游戏名称": "Real Trial One",
+                "上线状态": "live",
+                "版号": "ISBN-001",
+                "ICP备案号": "ICP-001",
+                "风险预警": "Renewal owner unclear",
+                "试跑备注": "confirm with legal BP",
+            },
+            {
+                "项目代号": "GAME-002",
+                "游戏名称": "Real Trial Two",
+                "上线状态": "testing",
+                "版号": "",
+                "ICP备案号": "",
+                "风险预警": "",
+                "试跑备注": "",
+            },
+            {
+                "项目代号": "GAME-003",
+                "游戏名称": "Real Trial Three",
+                "上线状态": "planning",
+                "版号": "ISBN-003",
+                "ICP备案号": "",
+                "风险预警": "",
+                "试跑备注": "",
+            },
+        ],
+    )
+
+    assert main(["import", str(source), "--db", str(database_path)]) == 0
+
+    captured = capsys.readouterr()
+    assert "Import complete: 3 source rows processed" in captured.out
+    assert "projects: 3 created, 0 updated, 0 skipped, 0 failed" in captured.out
+    assert "licenses: 3 created, 0 updated, 0 skipped, 0 failed" in captured.out
+    assert "risks: 1 created, 0 updated, 0 skipped, 0 failed" in captured.out
+    assert "Warnings:" in captured.out
+    assert "project_ledger.csv row 2 field 试跑备注: unknown_column" in captured.out
+
+
+def test_project_ledger_template_supports_real_data_trial() -> None:
+    template = Path("data/import_templates/project_ledger.csv")
+
+    with template.open(encoding="utf-8-sig", newline="") as handle:
+        headers = next(csv.reader(handle))
+
+    assert headers[:3] == ["项目代号", "游戏名称", "上线状态"]
+    assert {
+        "法务BP",
+        "部门",
+        "发行团队",
+        "对接人",
+        "官网",
+        "版号",
+        "审批文号",
+        "ICP备案号",
+        "软著登记号",
+        "出版单位",
+        "商标权利人",
+        "软著著作权人",
+        "版号运营主体",
+        "实际运营主体",
+        "内部授权关系",
+        "风险预警",
+        "备注",
+    }.issubset(set(headers))

@@ -141,17 +141,27 @@ def _prompt_setup_client() -> str:
 
 
 def _print_import_report(report) -> None:
-    print("Import complete")
+    print(f"Import complete: {report.source_rows} source rows processed")
     for entity, counts in report.counts.items():
         if any(counts.values()):
             print(
                 f"{entity}: "
-                f"created={counts['created']} "
-                f"updated={counts['updated']} "
-                f"skipped={counts['skipped']} "
-                f"failed={counts['failed']}"
+                f"{counts['created']} created, "
+                f"{counts['updated']} updated, "
+                f"{counts['skipped']} skipped, "
+                f"{counts['failed']} failed"
             )
     if report.warnings:
-        print(f"warnings={len(report.warnings)}")
+        print("Warnings:")
+        for warning in report.warnings:
+            print(
+                f"- {warning.file_name} row {warning.row_number} "
+                f"field {warning.field_name}: {warning.error_code} - {warning.message}"
+            )
     if report.errors:
-        print(f"errors={len(report.errors)}")
+        print("Errors:")
+        for error in report.errors:
+            print(
+                f"- {error.file_name} row {error.row_number} "
+                f"field {error.field_name}: {error.error_code} - {error.message}"
+            )
