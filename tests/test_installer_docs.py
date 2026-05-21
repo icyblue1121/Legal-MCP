@@ -1,0 +1,28 @@
+from pathlib import Path
+import stat
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_install_script_bootstraps_uv_tool_install_and_setup() -> None:
+    script = ROOT / "install.sh"
+
+    content = script.read_text(encoding="utf-8")
+
+    assert content.startswith("#!/usr/bin/env sh")
+    assert script.stat().st_mode & stat.S_IXUSR
+    assert "uv tool install --upgrade" in content
+    assert "legal-mcp" in content
+    assert 'exec "$COMMAND" setup "$@"' in content
+
+
+def test_readme_documents_phase_6_commands() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "uv tool install --upgrade legal-mcp" in readme
+    assert "./install.sh --client cursor" in readme
+    assert "legal-mcp setup" in readme
+    assert "legal-mcp import" in readme
+    assert "legal-mcp doctor" in readme
+    assert "legal-mcp serve" in readme

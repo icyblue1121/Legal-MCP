@@ -7,10 +7,12 @@ import sys
 from pathlib import Path
 
 from legal_mcp import __version__
+from legal_mcp.audit import DEFAULT_AUDIT_PATH
 from legal_mcp.import_pipeline import import_file
 
 
 DEFAULT_DATABASE_PATH = Path.home() / ".legal-mcp" / "legal.db"
+SETUP_CLIENTS = ("claude", "cursor", "windsurf", "vscode", "codex", "generic")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -40,9 +42,42 @@ def build_parser() -> argparse.ArgumentParser:
     serve_parser.add_argument(
         "--audit-log",
         type=Path,
-        default=Path.home() / ".legal-mcp" / "audit.jsonl",
+        default=DEFAULT_AUDIT_PATH,
         help="Audit log JSONL path",
     )
+    setup_parser = subparsers.add_parser("setup", help="Configure a local MCP client")
+    setup_parser.add_argument(
+        "--client",
+        choices=SETUP_CLIENTS,
+        help="Client configuration to write",
+    )
+    setup_parser.add_argument("--config", type=Path, help="Override client config path")
+    setup_parser.add_argument(
+        "--db",
+        type=Path,
+        default=DEFAULT_DATABASE_PATH,
+        help=f"SQLite database path (default: {DEFAULT_DATABASE_PATH})",
+    )
+    setup_parser.add_argument(
+        "--audit-log",
+        type=Path,
+        default=DEFAULT_AUDIT_PATH,
+        help=f"Audit log path (default: {DEFAULT_AUDIT_PATH})",
+    )
+    setup_parser.add_argument(
+        "--command",
+        dest="server_command",
+        default="legal-mcp",
+        help="Command clients should run to start Legal-MCP",
+    )
+    doctor_parser = subparsers.add_parser("doctor", help="Validate local install health")
+    doctor_parser.add_argument(
+        "--db",
+        type=Path,
+        default=DEFAULT_DATABASE_PATH,
+        help=f"SQLite database path (default: {DEFAULT_DATABASE_PATH})",
+    )
+    doctor_parser.add_argument("--config", type=Path, help="Optional client config path to check")
     return parser
 
 
@@ -58,9 +93,51 @@ def main(argv: list[str] | None = None) -> int:
 
         serve(args.db, args.audit_log, sys.stdin.buffer, sys.stdout.buffer, sys.stderr)
         return 0
+    if args.command == "setup":
+        from legal_mcp.setup_wizard import configure_client
+
+        client = args.client or _prompt_setup_client()
+        config_path = configure_client(
+            client,
+            config_path=args.config,
+            database_path=args.db,
+            audit_path=args.audit_log,
+            command=args.server_command,
+        )
+        print(f"Configured {client}: {config_path}")
+        print(f"Database ready: {args.db}")
+        print("You can re-run legal-mcp setup at any time to repair or update this configuration.")
+        return 0
+    if args.command == "doctor":
+        from legal_mcp.doctor import check_install_health
+
+        report = check_install_health(database_path=args.db, config_path=args.config)
+        status = "healthy" if report.healthy else "unhealthy"
+        print(f"Legal-MCP doctor: {status}")
+        for check in report.checks:
+            mark = "ok" if check.ok else "fail"
+            print(f"{mark}: {check.message}")
+        return 0 if report.healthy else 1
 
     parser.print_help()
     return 0
+
+
+def _prompt_setup_client() -> str:
+    print("Choose an MCP client to configure:")
+    for index, client in enumerate(SETUP_CLIENTS, start=1):
+        print(f"  {index}. {client}")
+    while True:
+        answer = input("Client [cursor]: ").strip().lower()
+        if not answer:
+            return "cursor"
+        if answer in SETUP_CLIENTS:
+            return answer
+        if answer.isdigit():
+            selected = int(answer)
+            if 1 <= selected <= len(SETUP_CLIENTS):
+                return SETUP_CLIENTS[selected - 1]
+        print("Please enter a client name or number.")
 
 
 def _print_import_report(report) -> None:

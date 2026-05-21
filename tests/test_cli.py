@@ -18,3 +18,74 @@ def test_cli_exposes_serve_command() -> None:
     args = parser.parse_args(["serve", "--db", "legal.db"])
 
     assert args.command == "serve"
+
+
+def test_cli_setup_accepts_common_ai_app_clients() -> None:
+    parser = main.__globals__["build_parser"]()
+
+    for client in ["claude", "windsurf", "vscode"]:
+        args = parser.parse_args(["setup", "--client", client])
+        assert args.client == client
+
+
+def test_cli_setup_can_launch_guided_mode_without_client() -> None:
+    parser = main.__globals__["build_parser"]()
+
+    args = parser.parse_args(["setup"])
+
+    assert args.command == "setup"
+    assert args.client is None
+
+
+def test_setup_command_writes_cursor_config_and_mentions_rerun(tmp_path, capsys) -> None:
+    config_path = tmp_path / "mcp.json"
+    database_path = tmp_path / "legal.db"
+    audit_path = tmp_path / "audit.jsonl"
+
+    assert (
+        main(
+            [
+                "setup",
+                "--client",
+                "cursor",
+                "--config",
+                str(config_path),
+                "--db",
+                str(database_path),
+                "--audit-log",
+                str(audit_path),
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert "Configured cursor" in captured.out
+    assert "You can re-run legal-mcp setup" in captured.out
+    assert config_path.exists()
+    assert database_path.exists()
+
+
+def test_doctor_command_validates_setup_health(tmp_path, capsys) -> None:
+    config_path = tmp_path / "mcp.json"
+    database_path = tmp_path / "legal.db"
+    audit_path = tmp_path / "audit.jsonl"
+    main(
+        [
+            "setup",
+            "--client",
+            "cursor",
+            "--config",
+            str(config_path),
+            "--db",
+            str(database_path),
+            "--audit-log",
+            str(audit_path),
+        ]
+    )
+    capsys.readouterr()
+
+    assert main(["doctor", "--db", str(database_path), "--config", str(config_path)]) == 0
+
+    captured = capsys.readouterr()
+    assert "Legal-MCP doctor: healthy" in captured.out

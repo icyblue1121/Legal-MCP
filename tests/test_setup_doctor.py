@@ -1,0 +1,142 @@
+import json
+import tomllib
+
+from legal_mcp.doctor import check_install_health
+from legal_mcp.setup_wizard import (
+    build_stdio_server_config,
+    write_claude_config,
+    write_codex_config,
+    write_cursor_config,
+    write_generic_stdio_config,
+    write_vscode_config,
+    write_windsurf_config,
+)
+
+
+def test_build_stdio_server_config_uses_serve_command_and_paths(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    audit_path = tmp_path / "audit.jsonl"
+
+    config = build_stdio_server_config(database_path, audit_path, command="legal-mcp")
+
+    assert config == {
+        "type": "stdio",
+        "command": "legal-mcp",
+        "args": [
+            "serve",
+            "--db",
+            str(database_path),
+            "--audit-log",
+            str(audit_path),
+        ],
+    }
+
+
+def test_json_client_writers_merge_legal_mcp_server(tmp_path) -> None:
+    claude_path = tmp_path / "claude_desktop_config.json"
+    cursor_path = tmp_path / "mcp.json"
+    windsurf_path = tmp_path / "mcp_config.json"
+    claude_path.write_text(
+        json.dumps({"mcpServers": {"existing": {"command": "node"}}}),
+        encoding="utf-8",
+    )
+
+    write_claude_config(claude_path, tmp_path / "legal.db", tmp_path / "audit.jsonl")
+    write_cursor_config(cursor_path, tmp_path / "legal.db", tmp_path / "audit.jsonl")
+    write_windsurf_config(windsurf_path, tmp_path / "legal.db", tmp_path / "audit.jsonl")
+
+    claude_config = json.loads(claude_path.read_text(encoding="utf-8"))
+    cursor_config = json.loads(cursor_path.read_text(encoding="utf-8"))
+    windsurf_config = json.loads(windsurf_path.read_text(encoding="utf-8"))
+    assert "existing" in claude_config["mcpServers"]
+    assert claude_config["mcpServers"]["legal-mcp"]["command"] == "legal-mcp"
+    assert cursor_config["mcpServers"]["legal-mcp"]["args"][0] == "serve"
+    assert windsurf_config["mcpServers"]["legal-mcp"]["type"] == "stdio"
+
+
+def test_vscode_writer_uses_servers_convention(tmp_path) -> None:
+    config_path = tmp_path / "mcp.json"
+    config_path.write_text(
+        json.dumps({"servers": {"existing": {"command": "node"}}, "inputs": []}),
+        encoding="utf-8",
+    )
+
+    write_vscode_config(config_path, tmp_path / "legal.db", tmp_path / "audit.jsonl")
+
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    assert "existing" in config["servers"]
+    assert config["servers"]["legal-mcp"]["type"] == "stdio"
+    assert config["servers"]["legal-mcp"]["args"][0] == "serve"
+    assert config["inputs"] == []
+
+
+def test_codex_writer_merges_toml_mcp_server(tmp_path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('model = "gpt-5.4"\n', encoding="utf-8")
+
+    write_codex_config(config_path, tmp_path / "legal.db", tmp_path / "audit.jsonl")
+
+    parsed = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    assert parsed["model"] == "gpt-5.4"
+    assert parsed["mcp_servers"]["legal-mcp"]["command"] == "legal-mcp"
+    assert parsed["mcp_servers"]["legal-mcp"]["args"][0] == "serve"
+
+
+def test_generic_stdio_writer_outputs_server_config(tmp_path) -> None:
+    config_path = tmp_path / "legal-mcp-stdio.json"
+
+    write_generic_stdio_config(config_path, tmp_path / "legal.db", tmp_path / "audit.jsonl")
+
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    assert config["legal-mcp"]["type"] == "stdio"
+
+
+def test_doctor_reports_missing_database_and_healthy_database(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+
+    missing = check_install_health(database_path=database_path)
+    assert not missing.healthy
+    assert any(check.code == "database_missing" for check in missing.checks)
+
+    from legal_mcp import db
+
+    db.initialize_database(database_path)
+    healthy = check_install_health(database_path=database_path)
+    assert healthy.healthy
+
+
+def test_doctor_validates_config_contains_legal_mcp_server(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    config_path = tmp_path / "mcp.json"
+    from legal_mcp import db
+
+    db.initialize_database(database_path)
+    config_path.write_text(json.dumps({"mcpServers": {}}), encoding="utf-8")
+
+    report = check_install_health(database_path=database_path, config_path=config_path)
+
+    assert not report.healthy
+    assert any(check.code == "config_legal_mcp" for check in report.checks)
+
+
+def test_doctor_accepts_vscode_servers_config(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    config_path = tmp_path / "mcp.json"
+    from legal_mcp import db
+
+    db.initialize_database(database_path)
+    write_vscode_config(config_path, database_path, tmp_path / "audit.jsonl")
+
+    report = check_install_health(database_path=database_path, config_path=config_path)
+
+    assert report.healthy
+
+
+def test_doctor_reports_unreadable_database_without_crashing(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    database_path.write_text("not sqlite", encoding="utf-8")
+
+    report = check_install_health(database_path=database_path)
+
+    assert not report.healthy
+    assert any(check.code == "database_readable" for check in report.checks)
