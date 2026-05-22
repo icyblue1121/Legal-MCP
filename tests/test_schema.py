@@ -254,14 +254,96 @@ def test_identity_schema_enforces_unique_email_and_project_grants(tmp_path) -> N
             )
 
         conn.execute(
-            "insert into project_access (user_id, project_id) values (?, ?)",
-            (user_id, project_id),
+            "insert into project_access "
+            "(user_id, project_id, granted_by_user_id) values (?, ?, ?)",
+            (user_id, project_id, user_id),
         )
+
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "insert into project_access "
+                "(user_id, project_id, granted_by_user_id) values (?, ?, ?)",
+                (user_id, project_id, user_id),
+            )
+    finally:
+        conn.close()
+
+
+def test_identity_schema_enforces_required_api_key_and_grant_fields(tmp_path) -> None:
+    db_path = tmp_path / "legal.db"
+    db.initialize_database(db_path)
+
+    conn = db.connect(db_path)
+    try:
+        conn.execute(
+            "insert into projects (project_code, name, stage) values (?, ?, ?)",
+            ("GAME-001", "Project One", "live"),
+        )
+        project_id = conn.execute(
+            "select id from projects where project_code = ?", ("GAME-001",)
+        ).fetchone()["id"]
+
+        conn.execute(
+            "insert into users (email, display_name, role) values (?, ?, ?)",
+            ("admin@example.com", "Admin User", "admin"),
+        )
+        user_id = conn.execute(
+            "select id from users where email = ?", ("admin@example.com",)
+        ).fetchone()["id"]
+
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "insert into api_keys (user_id, key_prefix, key_hash) values (?, ?, ?)",
+                (user_id, "lk_test", "hashed-secret"),
+            )
 
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(
                 "insert into project_access (user_id, project_id) values (?, ?)",
                 (user_id, project_id),
+            )
+    finally:
+        conn.close()
+
+
+def test_audit_schema_enforces_required_fields_defaults_and_decisions(tmp_path) -> None:
+    db_path = tmp_path / "legal.db"
+    db.initialize_database(db_path)
+
+    conn = db.connect(db_path)
+    try:
+        conn.execute(
+            "insert into audit_events (tool_name, arguments_summary, result_status) "
+            "values (?, ?, ?)",
+            ("search_contracts", "{}", "success"),
+        )
+        audit_event_id = conn.execute("select id from audit_events").fetchone()["id"]
+        response_record_count = conn.execute(
+            "select response_record_count from audit_events where id = ?",
+            (audit_event_id,),
+        ).fetchone()["response_record_count"]
+        assert response_record_count == 0
+
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "insert into audit_events (tool_name, result_status) values (?, ?)",
+                ("search_contracts", "success"),
+            )
+
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "insert into audit_disclosures "
+                "(audit_event_id, record_type, record_id, decision, reason) "
+                "values (?, ?, ?, ?, ?)",
+                (audit_event_id, "contract", 1, "maybe", "Invalid decision"),
+            )
+
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "insert into audit_disclosures "
+                "(audit_event_id, record_type, record_id, decision) "
+                "values (?, ?, ?, ?)",
+                (audit_event_id, "contract", 1, "allowed"),
             )
     finally:
         conn.close()

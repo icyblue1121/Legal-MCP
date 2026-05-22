@@ -76,7 +76,7 @@ create table if not exists api_keys (
   user_id integer not null references users(id),
   key_prefix text not null,
   key_hash text not null,
-  label text,
+  label text not null,
   status text not null default 'active' check (status in ('active', 'revoked')),
   last_used_at text,
   created_at text not null default (datetime('now')),
@@ -87,7 +87,7 @@ create table if not exists project_access (
   id integer primary key,
   user_id integer not null references users(id),
   project_id integer not null references projects(id),
-  granted_by_user_id integer references users(id),
+  granted_by_user_id integer not null references users(id),
   created_at text not null default (datetime('now')),
   unique(user_id, project_id)
 );
@@ -108,10 +108,10 @@ create table if not exists audit_events (
   source_client text,
   tool_name text not null,
   rationale text,
-  arguments_summary text,
+  arguments_summary text not null,
   result_status text not null,
   error_code text,
-  response_record_count integer
+  response_record_count integer not null default 0
 );
 
 create table if not exists audit_disclosures (
@@ -120,8 +120,8 @@ create table if not exists audit_disclosures (
   project_id integer references projects(id),
   record_type text not null,
   record_id integer not null,
-  decision text not null,
-  reason text
+  decision text not null check (decision in ('allowed', 'denied')),
+  reason text not null
 );
 
 create index if not exists idx_projects_stage on projects(stage);
