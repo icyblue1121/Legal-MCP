@@ -1,0 +1,145 @@
+from __future__ import annotations
+
+import sqlite3
+
+import pytest
+
+from legal_mcp import db
+from legal_mcp.disclosure_audit import (
+    Disclosure,
+    list_audit_events,
+    write_audit_event,
+)
+from legal_mcp.identity import ROLE_BUSINESS, create_api_key, create_user
+from legal_mcp.policy import AccessContext
+
+
+@pytest.fixture()
+def conn(tmp_path) -> sqlite3.Connection:
+    db_path = tmp_path / "legal.db"
+    db.initialize_database(db_path)
+    connection = db.connect(db_path)
+    try:
+        yield connection
+    finally:
+        connection.close()
+
+
+def _project(conn: sqlite3.Connection, code: str) -> int:
+    cursor = conn.execute(
+        "insert into projects (project_code, name, stage) values (?, ?, ?)",
+        (code, f"{code} Project", "live"),
+    )
+    conn.commit()
+    return int(cursor.lastrowid)
+
+
+def test_write_audit_event_persists_event_and_disclosure(
+    conn: sqlite3.Connection,
+) -> None:
+    user = create_user(
+        conn,
+        email="business@example.com",
+        display_name="Business User",
+        role=ROLE_BUSINESS,
+    )
+    key = create_api_key(conn, user_id=user["id"], label="pytest")
+    project_id = _project(conn, "GAME-001")
+    context = AccessContext.from_user(user, api_key_id=key.api_key_id)
+
+    event_id = write_audit_event(
+        conn,
+        context=context,
+        tool_name="list_contracts",
+        rationale="contract review",
+        source_client="pytest",
+        arguments={"project_id": project_id, "rationale": "contract review"},
+        result={"contracts": [{"id": 7, "title": "MSA"}]},
+        disclosures=[
+            Disclosure(
+                project_id=project_id,
+                record_type="contract",
+                record_id=7,
+                decision="allowed",
+                reason="business user has project access",
+            )
+        ],
+    )
+
+    event = conn.execute(
+        "select * from audit_events where id = ?",
+        (event_id,),
+    ).fetchone()
+    assert event["user_id"] == user["id"]
+    assert event["api_key_id"] == key.api_key_id
+    assert event["tool_name"] == "list_contracts"
+    assert event["result_status"] == "success"
+    assert event["error_code"] is None
+    assert event["response_record_count"] == 1
+
+    disclosure = conn.execute(
+        "select * from audit_disclosures where audit_event_id = ?",
+        (event_id,),
+    ).fetchone()
+    assert disclosure["project_id"] == project_id
+    assert disclosure["record_type"] == "contract"
+    assert disclosure["record_id"] == 7
+    assert disclosure["decision"] == "allowed"
+    assert disclosure["reason"] == "business user has project access"
+
+
+def test_list_audit_events_filters_by_project_id_and_returns_email_and_tool_name(
+    conn: sqlite3.Connection,
+) -> None:
+    user = create_user(
+        conn,
+        email="business@example.com",
+        display_name="Business User",
+        role=ROLE_BUSINESS,
+    )
+    project_id = _project(conn, "GAME-001")
+    other_project_id = _project(conn, "GAME-002")
+    context = AccessContext.from_user(user)
+
+    write_audit_event(
+        conn,
+        context=context,
+        tool_name="visible_tool",
+        rationale=None,
+        source_client=None,
+        arguments={},
+        result={"projects": [{"id": project_id}]},
+        disclosures=[
+            Disclosure(
+                project_id=project_id,
+                record_type="project",
+                record_id=project_id,
+                decision="allowed",
+                reason="included in response",
+            )
+        ],
+    )
+    write_audit_event(
+        conn,
+        context=context,
+        tool_name="hidden_tool",
+        rationale=None,
+        source_client=None,
+        arguments={},
+        result={"projects": [{"id": other_project_id}]},
+        disclosures=[
+            Disclosure(
+                project_id=other_project_id,
+                record_type="project",
+                record_id=other_project_id,
+                decision="allowed",
+                reason="included in response",
+            )
+        ],
+    )
+
+    rows = list_audit_events(conn, project_id=project_id)
+
+    assert len(rows) == 1
+    assert rows[0]["email"] == "business@example.com"
+    assert rows[0]["tool_name"] == "visible_tool"
