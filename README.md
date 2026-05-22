@@ -29,9 +29,7 @@ LEGAL_MCP_PACKAGE=. ./install.sh --client cursor
 
 Run `legal-mcp setup --client CLIENT` to write a local stdio MCP server config.
 Supported clients are `claude`, `cursor`, `windsurf`, `vscode`, `codex`, and
-`generic`. You can re-run setup later to repair or update the config. See
-[Docs/client-setup.md](Docs/client-setup.md) for client-specific paths and
-options.
+`generic`. You can re-run setup later to repair or update the config.
 
 Import legal project data from CSV or XLSX:
 
@@ -40,9 +38,8 @@ legal-mcp import path/to/projects.csv
 legal-mcp import path/to/project-ledger.xlsx
 ```
 
-For a real data trial, start from `data/import_templates/project_ledger.csv`,
-replace the example row with three to five real projects, then follow
-[Docs/real-data-trial.md](Docs/real-data-trial.md).
+Keep real client data, local trial databases, CSV exports, XLSX ledgers, and
+other working files outside Git. The repository intentionally ships with empty data directories only.
 
 Check install health, including database schema and an optional client config:
 
@@ -107,4 +104,5 @@ Clients that use the generated stdio config will run:
 legal-mcp proxy --url http://legal-mcp.internal:8765/mcp --token "$LEGAL_MCP_TOKEN"
 ```
 
-See [Docs/team-deployment.md](Docs/team-deployment.md) for the full runbook.
+Keep deployment notes that contain hostnames, client paths, tokens, or real data
+in local documents outside Git.

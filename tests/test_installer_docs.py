@@ -30,8 +30,7 @@ def test_readme_documents_phase_6_commands() -> None:
 
 def test_readme_documents_real_data_trial_entrypoint() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    trial_doc = ROOT / "Docs" / "real-data-trial.md"
 
-    assert "data/import_templates/project_ledger.csv" in readme
-    assert "Docs/real-data-trial.md" in readme
-    assert trial_doc.exists()
+    assert "Keep real client data" in readme
+    assert "outside Git" in readme
+    assert "empty data directories only" in readme

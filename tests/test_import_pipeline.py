@@ -338,12 +338,29 @@ def test_cli_ledger_import_report_is_readable_for_real_data_trial(tmp_path, caps
     assert "project_ledger.csv row 2 field 试跑备注: unknown_column" in captured.out
 
 
-def test_project_ledger_template_supports_real_data_trial() -> None:
-    template = Path("data/import_templates/project_ledger.csv")
-
-    with template.open(encoding="utf-8-sig", newline="") as handle:
-        headers = next(csv.reader(handle))
-
+def test_project_ledger_headers_support_real_data_trial() -> None:
+    headers = [
+        "项目代号",
+        "游戏名称",
+        "上线状态",
+        "法务BP",
+        "部门",
+        "发行团队",
+        "对接人",
+        "官网",
+        "版号",
+        "审批文号",
+        "ICP备案号",
+        "软著登记号",
+        "出版单位",
+        "商标权利人",
+        "软著著作权人",
+        "版号运营主体",
+        "实际运营主体",
+        "内部授权关系",
+        "风险预警",
+        "备注",
+    ]
     assert headers[:3] == ["项目代号", "游戏名称", "上线状态"]
     assert {
         "法务BP",

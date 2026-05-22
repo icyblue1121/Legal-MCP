@@ -5,7 +5,15 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .worktrees/
+.agents/
 build/
-Docs/superpowers/
+Docs/
 *.db
-data/import_templates/*.csv
+*.sqlite
+*.sqlite3
+*.jsonl
+data/**
+!data/
+!data/**/
+!data/**/.gitkeep
+tests/fixtures/
