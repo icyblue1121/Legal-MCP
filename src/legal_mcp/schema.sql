@@ -119,7 +119,7 @@ create table if not exists audit_disclosures (
   audit_event_id integer not null references audit_events(id),
   project_id integer references projects(id),
   record_type text not null,
-  record_id integer not null,
+  record_id integer,
   decision text not null check (decision in ('allowed', 'denied')),
   reason text not null
 );

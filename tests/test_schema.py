@@ -338,6 +338,18 @@ def test_audit_schema_enforces_required_fields_defaults_and_decisions(tmp_path) 
                 (audit_event_id, "contract", 1, "maybe", "Invalid decision"),
             )
 
+        conn.execute(
+            "insert into audit_disclosures "
+            "(audit_event_id, record_type, record_id, decision, reason) "
+            "values (?, ?, ?, ?, ?)",
+            (audit_event_id, "summary", None, "allowed", "Aggregate disclosure"),
+        )
+        disclosure = conn.execute(
+            "select record_id from audit_disclosures where record_type = ?",
+            ("summary",),
+        ).fetchone()
+        assert disclosure["record_id"] is None
+
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(
                 "insert into audit_disclosures "

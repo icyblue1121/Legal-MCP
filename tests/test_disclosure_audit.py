@@ -88,6 +88,44 @@ def test_write_audit_event_persists_event_and_disclosure(
     assert disclosure["reason"] == "business user has project access"
 
 
+def test_write_audit_event_persists_disclosure_without_record_id(
+    conn: sqlite3.Connection,
+) -> None:
+    user = create_user(
+        conn,
+        email="business@example.com",
+        display_name="Business User",
+        role=ROLE_BUSINESS,
+    )
+    project_id = _project(conn, "GAME-001")
+    context = AccessContext.from_user(user)
+
+    event_id = write_audit_event(
+        conn,
+        context=context,
+        tool_name="summarize_project",
+        rationale="project summary",
+        source_client="pytest",
+        arguments={"project_id": project_id},
+        result={"summary": {"project_id": project_id, "risk_count": 0}},
+        disclosures=[
+            Disclosure(
+                project_id=project_id,
+                record_type="summary",
+                record_id=None,
+                decision="allowed",
+                reason="aggregate project summary",
+            )
+        ],
+    )
+
+    disclosure = conn.execute(
+        "select record_id from audit_disclosures where audit_event_id = ?",
+        (event_id,),
+    ).fetchone()
+    assert disclosure["record_id"] is None
+
+
 def test_list_audit_events_filters_by_project_id_and_returns_email_and_tool_name(
     conn: sqlite3.Connection,
 ) -> None:
