@@ -5,3 +5,7 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .worktrees/
+build/
+Docs/superpowers/
+*.db
+data/import_templates/*.csv
