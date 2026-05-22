@@ -10,6 +10,12 @@ from typing import Any
 from legal_mcp import db
 from legal_mcp.audit import DEFAULT_AUDIT_PATH, write_audit_record
 from legal_mcp.lookup import ProjectLookupResult, lookup_project
+from legal_mcp.policy import (
+    AccessContext,
+    can_query_content,
+    project_is_visible,
+    visible_project_ids,
+)
 
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
@@ -74,6 +80,7 @@ def call_tool(
     *,
     database_path: str | Path,
     audit_path: str | Path = DEFAULT_AUDIT_PATH,
+    access_context: AccessContext | None = None,
 ) -> dict[str, Any]:
     rationale = arguments.get("rationale")
     source_client = arguments.get("source_client")
@@ -82,17 +89,22 @@ def call_tool(
         _audit(tool_name, rationale, source_client, arguments, result, audit_path)
         return result
 
+    if not can_query_content(access_context):
+        result = _error("access_denied", "user is not allowed to query project content")
+        _audit(tool_name, rationale, source_client, arguments, result, audit_path)
+        return result
+
     try:
         conn = db.connect(database_path)
         try:
             if tool_name == "list_projects":
-                result = _list_projects(conn, arguments)
+                result = _list_projects(conn, arguments, access_context)
             elif tool_name == "get_project_context":
-                result = _get_project_context(conn, arguments)
+                result = _get_project_context(conn, arguments, access_context)
             elif tool_name == "list_expiring_licenses":
-                result = _list_expiring_licenses(conn, arguments)
+                result = _list_expiring_licenses(conn, arguments, access_context)
             elif tool_name == "list_open_risks":
-                result = _list_open_risks(conn, arguments)
+                result = _list_open_risks(conn, arguments, access_context)
             else:
                 result = _error("validation_error", f"unknown tool: {tool_name}")
         finally:
@@ -104,19 +116,39 @@ def call_tool(
     return result
 
 
-def _list_projects(conn: sqlite3.Connection, arguments: dict[str, Any]) -> dict[str, Any]:
+def _list_projects(
+    conn: sqlite3.Connection,
+    arguments: dict[str, Any],
+    access_context: AccessContext | None,
+) -> dict[str, Any]:
     stage = arguments.get("stage")
+    visible = visible_project_ids(conn, access_context)
+    if visible == set():
+        return {"projects": []}
+
+    filters: list[str] = []
+    params: list[Any] = []
     if stage:
-        rows = conn.execute(
-            "select * from projects where stage = ? order by project_code",
-            (stage,),
-        ).fetchall()
-    else:
-        rows = conn.execute("select * from projects order by project_code").fetchall()
+        filters.append("stage = ?")
+        params.append(stage)
+    if visible is not None:
+        placeholders = ", ".join("?" for _ in visible)
+        filters.append(f"id in ({placeholders})")
+        params.extend(sorted(visible))
+
+    where = f" where {' and '.join(filters)}" if filters else ""
+    rows = conn.execute(
+        f"select * from projects{where} order by project_code",
+        params,
+    ).fetchall()
     return {"projects": [dict(row) for row in rows]}
 
 
-def _get_project_context(conn: sqlite3.Connection, arguments: dict[str, Any]) -> dict[str, Any]:
+def _get_project_context(
+    conn: sqlite3.Connection,
+    arguments: dict[str, Any],
+    access_context: AccessContext | None,
+) -> dict[str, Any]:
     query = arguments.get("project_id_or_name")
     if not isinstance(query, str) or not query.strip():
         return _error("validation_error", "project_id_or_name is required")
@@ -133,6 +165,9 @@ def _get_project_context(conn: sqlite3.Connection, arguments: dict[str, Any]) ->
 
     project = lookup.project or {}
     project_id = project["id"]
+    if not project_is_visible(conn, access_context, int(project_id)):
+        return _error("not_found", "project not found")
+
     licenses = conn.execute(
         "select * from licenses where project_id = ? order by external_key",
         (project_id,),
@@ -153,50 +188,73 @@ def _get_project_context(conn: sqlite3.Connection, arguments: dict[str, Any]) ->
     }
 
 
-def _list_expiring_licenses(conn: sqlite3.Connection, arguments: dict[str, Any]) -> dict[str, Any]:
+def _list_expiring_licenses(
+    conn: sqlite3.Connection,
+    arguments: dict[str, Any],
+    access_context: AccessContext | None,
+) -> dict[str, Any]:
     days_ahead = arguments.get("days_ahead", 30)
     if not isinstance(days_ahead, int) or days_ahead < 0:
         return _error("validation_error", "days_ahead must be a non-negative integer")
+    visible = visible_project_ids(conn, access_context)
+    if visible == set():
+        return {"licenses": []}
+
     start = date.today().isoformat()
     end = (date.today() + timedelta(days=days_ahead)).isoformat()
+    project_filter = ""
+    params: list[Any] = [start, end]
+    if visible is not None:
+        placeholders = ", ".join("?" for _ in visible)
+        project_filter = f" and projects.id in ({placeholders})"
+        params.extend(sorted(visible))
+
     rows = conn.execute(
-        """
+        f"""
         select licenses.*, projects.project_code, projects.name as project_name
         from licenses
         join projects on projects.id = licenses.project_id
         where licenses.expiry_date is not null
           and licenses.expiry_date >= ?
           and licenses.expiry_date <= ?
+          {project_filter}
         order by licenses.expiry_date, projects.project_code, licenses.external_key
         """,
-        (start, end),
+        params,
     ).fetchall()
     return {"licenses": [dict(row) for row in rows]}
 
 
-def _list_open_risks(conn: sqlite3.Connection, arguments: dict[str, Any]) -> dict[str, Any]:
+def _list_open_risks(
+    conn: sqlite3.Connection,
+    arguments: dict[str, Any],
+    access_context: AccessContext | None,
+) -> dict[str, Any]:
     project_code = arguments.get("project_code")
+    visible = visible_project_ids(conn, access_context)
+    if visible == set():
+        return {"risks": []}
+
+    filters = ["risks.status = 'open'"]
+    params: list[Any] = []
     if project_code:
-        rows = conn.execute(
-            """
-            select risks.*, projects.project_code, projects.name as project_name
-            from risks
-            join projects on projects.id = risks.project_id
-            where risks.status = 'open' and projects.project_code = ?
-            order by projects.project_code, risks.external_key
-            """,
-            (project_code,),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            """
-            select risks.*, projects.project_code, projects.name as project_name
-            from risks
-            join projects on projects.id = risks.project_id
-            where risks.status = 'open'
-            order by projects.project_code, risks.external_key
-            """
-        ).fetchall()
+        filters.append("projects.project_code = ?")
+        params.append(project_code)
+    if visible is not None:
+        placeholders = ", ".join("?" for _ in visible)
+        filters.append(f"projects.id in ({placeholders})")
+        params.extend(sorted(visible))
+
+    rows = conn.execute(
+        f"""
+        select risks.*, projects.project_code, projects.name as project_name
+        from risks
+        join projects on projects.id = risks.project_id
+        where {' and '.join(filters)}
+        order by projects.project_code, risks.external_key
+        """,
+        params,
+    ).fetchall()
     return {"risks": [dict(row) for row in rows]}
 
 

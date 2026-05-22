@@ -1,6 +1,8 @@
 from datetime import date, timedelta
 
 from legal_mcp import db
+from legal_mcp.identity import ROLE_AUDITOR, ROLE_BUSINESS, ROLE_LEGAL, create_user
+from legal_mcp.policy import AccessContext
 from legal_mcp.tools import call_tool
 
 
@@ -26,6 +28,23 @@ def seed_project(conn, *, code: str = "GAME-001", name: str = "Project One") -> 
     )
     conn.commit()
     return int(cursor.lastrowid)
+
+
+def grant_project_access(conn, *, user_id: int, project_id: int) -> None:
+    grantor = create_user(
+        conn,
+        email=f"grantor-{user_id}-{project_id}@example.com",
+        display_name="Grantor",
+        role=ROLE_LEGAL,
+    )
+    conn.execute(
+        """
+        insert into project_access (user_id, project_id, granted_by_user_id)
+        values (?, ?, ?)
+        """,
+        (user_id, project_id, grantor["id"]),
+    )
+    conn.commit()
 
 
 def test_all_tools_require_rationale(tmp_path) -> None:
@@ -177,3 +196,123 @@ def test_open_risks_exclude_closed_risks(tmp_path) -> None:
     )
 
     assert [risk["external_key"] for risk in result["risks"]] == ["risk-open"]
+
+
+def test_list_projects_filters_to_business_project_access_grants(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        visible_project_id = seed_project(conn, code="GAME-001", name="Visible Project")
+        seed_project(conn, code="GAME-002", name="Hidden Project")
+        business_user = create_user(
+            conn,
+            email="business@example.com",
+            display_name="Business User",
+            role=ROLE_BUSINESS,
+        )
+        grant_project_access(conn, user_id=business_user["id"], project_id=visible_project_id)
+        context = AccessContext.from_user(business_user)
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "list_projects",
+        {"rationale": "review accessible projects"},
+        database_path=database_path,
+        access_context=context,
+    )
+
+    assert [project["project_code"] for project in result["projects"]] == ["GAME-001"]
+
+
+def test_get_project_context_returns_not_found_for_hidden_project(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        seed_project(conn, code="GAME-001", name="Visible Project")
+        seed_project(conn, code="GAME-002", name="Hidden Project")
+        business_user = create_user(
+            conn,
+            email="business@example.com",
+            display_name="Business User",
+            role=ROLE_BUSINESS,
+        )
+        context = AccessContext.from_user(business_user)
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "get_project_context",
+        {"project_id_or_name": "GAME-002", "rationale": "review project context"},
+        database_path=database_path,
+        access_context=context,
+    )
+
+    assert result["error"]["code"] == "not_found"
+
+
+def test_legal_user_sees_all_projects_without_grants(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        seed_project(conn, code="GAME-001", name="First Project")
+        seed_project(conn, code="GAME-002", name="Second Project")
+        legal_user = create_user(
+            conn,
+            email="legal@example.com",
+            display_name="Legal User",
+            role=ROLE_LEGAL,
+        )
+        context = AccessContext.from_user(legal_user)
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "list_projects",
+        {"rationale": "review all projects"},
+        database_path=database_path,
+        access_context=context,
+    )
+
+    assert [project["project_code"] for project in result["projects"]] == [
+        "GAME-001",
+        "GAME-002",
+    ]
+
+
+def test_auditor_cannot_call_content_tools(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        seed_project(conn)
+        auditor_user = create_user(
+            conn,
+            email="auditor@example.com",
+            display_name="Auditor User",
+            role=ROLE_AUDITOR,
+        )
+        context = AccessContext.from_user(auditor_user)
+    finally:
+        conn.close()
+
+    for tool_name, arguments in {
+        "list_projects": {"rationale": "audit project list"},
+        "get_project_context": {
+            "project_id_or_name": "GAME-001",
+            "rationale": "audit project details",
+        },
+        "list_expiring_licenses": {"rationale": "audit license list"},
+        "list_open_risks": {"rationale": "audit risk list"},
+    }.items():
+        result = call_tool(
+            tool_name,
+            arguments,
+            database_path=database_path,
+            access_context=context,
+        )
+
+        assert result["error"]["code"] == "access_denied"
