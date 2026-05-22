@@ -60,6 +60,64 @@ EXPECTED_COLUMNS = {
         "created_at",
         "updated_at",
     ],
+    "users": [
+        "id",
+        "email",
+        "display_name",
+        "role",
+        "status",
+        "password_hash",
+        "external_subject",
+        "created_at",
+        "updated_at",
+    ],
+    "api_keys": [
+        "id",
+        "user_id",
+        "key_prefix",
+        "key_hash",
+        "label",
+        "status",
+        "last_used_at",
+        "created_at",
+        "revoked_at",
+    ],
+    "project_access": [
+        "id",
+        "user_id",
+        "project_id",
+        "granted_by_user_id",
+        "created_at",
+    ],
+    "admin_sessions": [
+        "id",
+        "user_id",
+        "session_hash",
+        "expires_at",
+        "created_at",
+    ],
+    "audit_events": [
+        "id",
+        "timestamp",
+        "user_id",
+        "api_key_id",
+        "source_client",
+        "tool_name",
+        "rationale",
+        "arguments_summary",
+        "result_status",
+        "error_code",
+        "response_record_count",
+    ],
+    "audit_disclosures": [
+        "id",
+        "audit_event_id",
+        "project_id",
+        "record_type",
+        "record_id",
+        "decision",
+        "reason",
+    ],
 }
 
 EXPECTED_INDEXES = [
@@ -73,6 +131,19 @@ EXPECTED_INDEXES = [
     ("risks", ("project_id", "external_key"), True),
     ("risks", ("status",), False),
     ("risks", ("project_id", "status"), False),
+    ("users", ("email",), True),
+    ("users", ("external_subject",), False),
+    ("api_keys", ("key_prefix",), False),
+    ("api_keys", ("user_id",), False),
+    ("project_access", ("user_id", "project_id"), True),
+    ("project_access", ("project_id",), False),
+    ("admin_sessions", ("session_hash",), True),
+    ("admin_sessions", ("user_id",), False),
+    ("audit_events", ("timestamp",), False),
+    ("audit_events", ("user_id",), False),
+    ("audit_events", ("tool_name",), False),
+    ("audit_disclosures", ("audit_event_id",), False),
+    ("audit_disclosures", ("project_id",), False),
 ]
 
 
@@ -149,6 +220,48 @@ def test_schema_enforces_project_identity_and_allows_duplicate_names(tmp_path) -
             conn.execute(
                 "insert into projects (project_code, name, stage) values (?, ?, ?)",
                 ("GAME-001", "Renamed Later", "live"),
+            )
+    finally:
+        conn.close()
+
+
+def test_identity_schema_enforces_unique_email_and_project_grants(tmp_path) -> None:
+    db_path = tmp_path / "legal.db"
+    db.initialize_database(db_path)
+
+    conn = db.connect(db_path)
+    try:
+        conn.execute(
+            "insert into projects (project_code, name, stage) values (?, ?, ?)",
+            ("GAME-001", "Project One", "live"),
+        )
+        project_id = conn.execute(
+            "select id from projects where project_code = ?", ("GAME-001",)
+        ).fetchone()["id"]
+
+        conn.execute(
+            "insert into users (email, display_name, role) values (?, ?, ?)",
+            ("admin@example.com", "Admin User", "admin"),
+        )
+        user_id = conn.execute(
+            "select id from users where email = ?", ("admin@example.com",)
+        ).fetchone()["id"]
+
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "insert into users (email, display_name, role) values (?, ?, ?)",
+                ("admin@example.com", "Duplicate User", "legal"),
+            )
+
+        conn.execute(
+            "insert into project_access (user_id, project_id) values (?, ?)",
+            (user_id, project_id),
+        )
+
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "insert into project_access (user_id, project_id) values (?, ?)",
+                (user_id, project_id),
             )
     finally:
         conn.close()
