@@ -39,11 +39,13 @@ def proxy_stdio(
     stdin: BinaryIO = sys.stdin.buffer,
     stdout: BinaryIO = sys.stdout.buffer,
 ) -> None:
+    framing: str | None = None
     while True:
-        message = _read_message(stdin)
-        if message is None:
+        read_result = _read_message(stdin, framing)
+        if read_result is None:
             return
+        message, framing = read_result
         response = forward_message(message, url=url, token=token, timeout=timeout)
         if response is not None:
-            _write_message(stdout, response)
+            _write_message(stdout, response, framing)
             stdout.flush()
