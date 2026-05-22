@@ -10,9 +10,7 @@ from typing import BinaryIO, TextIO
 
 from legal_mcp.audit import DEFAULT_AUDIT_PATH
 from legal_mcp.cli import DEFAULT_DATABASE_PATH
-from legal_mcp.tools import TOOL_DEFINITIONS, call_tool
-
-PROTOCOL_VERSION = "2024-11-05"
+from legal_mcp.mcp_protocol import handle_message
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -41,62 +39,10 @@ def serve(
         if read_result is None:
             return
         message, framing = read_result
-        response = _handle_message(message, database_path=database_path, audit_path=audit_path)
+        response = handle_message(message, database_path=database_path, audit_path=audit_path)
         if response is not None:
             _write_message(stdout, response, framing)
             stdout.flush()
-
-
-def _handle_message(
-    message: dict,
-    *,
-    database_path: str | Path,
-    audit_path: str | Path,
-) -> dict | None:
-    request_id = message.get("id")
-    method = message.get("method")
-    if request_id is None:
-        return None
-
-    if method == "initialize":
-        return {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "result": {
-                "protocolVersion": PROTOCOL_VERSION,
-                "capabilities": {"tools": {}},
-                "serverInfo": {"name": "legal-mcp", "version": "0.1.0"},
-            },
-        }
-    if method == "tools/list":
-        return {"jsonrpc": "2.0", "id": request_id, "result": {"tools": TOOL_DEFINITIONS}}
-    if method == "tools/call":
-        params = message.get("params") or {}
-        result = call_tool(
-            params.get("name", ""),
-            params.get("arguments") or {},
-            database_path=database_path,
-            audit_path=audit_path,
-        )
-        return {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "result": {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": json.dumps(result, ensure_ascii=False, sort_keys=True),
-                    }
-                ],
-                "isError": "error" in result,
-            },
-        }
-
-    return {
-        "jsonrpc": "2.0",
-        "id": request_id,
-        "error": {"code": -32601, "message": f"method not found: {method}"},
-    }
 
 
 def _read_message(stdin: BinaryIO, framing: str | None = None) -> tuple[dict, str] | None:
@@ -111,7 +57,6 @@ def _read_message(stdin: BinaryIO, framing: str | None = None) -> tuple[dict, st
     if first_line.lstrip().startswith(b"{"):
         return json.loads(first_line), "jsonl"
     return _read_content_length_message(stdin, first_line=first_line)
-
 
 def _read_jsonl_message(stdin: BinaryIO) -> tuple[dict, str] | None:
     line = stdin.readline()

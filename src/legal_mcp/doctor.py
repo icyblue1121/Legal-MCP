@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import sqlite3
 import tomllib
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse, urlunparse
 
 from legal_mcp import __version__, db
 from legal_mcp.cli import DEFAULT_DATABASE_PATH
@@ -34,10 +36,27 @@ def check_install_health(
     *,
     database_path: str | Path = DEFAULT_DATABASE_PATH,
     config_path: str | Path | None = None,
+    remote_url: str | None = None,
 ) -> HealthReport:
     checks = [
         HealthCheck("package_import", True, f"legal-mcp {__version__} imports successfully")
     ]
+    if remote_url:
+        checks.append(_check_remote_health(remote_url))
+        if config_path is not None:
+            config = Path(config_path)
+            config_exists = config.exists()
+            checks.append(
+                HealthCheck(
+                    "config_exists",
+                    config_exists,
+                    f"client config {'found' if config_exists else 'not found'}: {config}",
+                )
+            )
+            if config_exists:
+                checks.append(_check_config(config))
+        return HealthReport(checks)
+
     database = Path(database_path)
     if not database.exists():
         checks.append(HealthCheck("database_missing", False, f"database not found: {database}"))
@@ -57,6 +76,29 @@ def check_install_health(
         if config_exists:
             checks.append(_check_config(config))
     return HealthReport(checks)
+
+
+def _health_url(remote_url: str) -> str:
+    parsed = urlparse(remote_url)
+    return urlunparse((parsed.scheme, parsed.netloc, "/healthz", "", "", ""))
+
+
+def _check_remote_health(remote_url: str) -> HealthCheck:
+    try:
+        request = urllib.request.Request(_health_url(remote_url), method="GET")
+        with urllib.request.urlopen(request, timeout=5) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        ok = response.status == 200 and payload.get("database") == "ready"
+    except Exception as exc:
+        return HealthCheck(
+            "remote_http",
+            False,
+            f"remote HTTP server check failed: {exc}",
+        )
+
+    if ok:
+        return HealthCheck("remote_http", True, f"remote HTTP server is healthy: {remote_url}")
+    return HealthCheck("remote_http", False, f"remote HTTP server is unhealthy: {remote_url}")
 
 
 def _check_database(database_path: Path) -> list[HealthCheck]:

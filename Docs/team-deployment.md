@@ -1,0 +1,150 @@
+# Team Deployment
+
+Legal-MCP team deployment lets one operator maintain the canonical legal database while team members query the same shared context from Codex, Cursor, Claude Desktop, or another MCP client.
+
+## Architecture
+
+```text
+Maintainer import
+      |
+      v
+/data/legal.db
+      |
+      v
+legal-mcp serve-http
+      |
+      v
+legal-mcp proxy on each desktop
+      |
+      v
+AI desktop client
+```
+
+## Operator setup
+
+1. Choose an intranet host reachable by team members.
+
+2. Create a long random token:
+
+```sh
+export LEGAL_MCP_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+```
+
+3. Import the current legal project ledger:
+
+```sh
+legal-mcp import project-ledger.xlsx --db /data/legal.db
+```
+
+4. Start the HTTP MCP server:
+
+```sh
+legal-mcp serve-http \
+  --host 0.0.0.0 \
+  --port 8765 \
+  --db /data/legal.db \
+  --audit-log /data/audit.jsonl \
+  --token "$LEGAL_MCP_TOKEN"
+```
+
+5. Check health:
+
+```sh
+legal-mcp doctor --remote-url http://legal-mcp.internal:8765/mcp
+```
+
+Expected output includes:
+
+```text
+Legal-MCP doctor: healthy
+ok: remote HTTP server is healthy: http://legal-mcp.internal:8765/mcp
+```
+
+## Docker Compose
+
+```sh
+export LEGAL_MCP_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+mkdir -p data
+legal-mcp import project-ledger.xlsx --db data/legal.db
+docker compose up --build
+```
+
+The server listens on:
+
+```text
+http://localhost:8765/mcp
+```
+
+## Team member setup
+
+Each team member installs Legal-MCP locally and configures their AI client to run a local proxy.
+
+Codex:
+
+```sh
+legal-mcp setup \
+  --client codex \
+  --remote-url http://legal-mcp.internal:8765/mcp \
+  --token "$LEGAL_MCP_TOKEN"
+```
+
+Equivalent one-line form:
+
+```sh
+legal-mcp setup --client codex --remote-url http://legal-mcp.internal:8765/mcp --token "$LEGAL_MCP_TOKEN"
+```
+
+Cursor:
+
+```sh
+legal-mcp setup \
+  --client cursor \
+  --remote-url http://legal-mcp.internal:8765/mcp \
+  --token "$LEGAL_MCP_TOKEN"
+```
+
+Generic stdio config:
+
+```sh
+legal-mcp setup \
+  --client generic \
+  --remote-url http://legal-mcp.internal:8765/mcp \
+  --token "$LEGAL_MCP_TOKEN"
+```
+
+The generated stdio entry runs:
+
+```sh
+legal-mcp proxy --url http://legal-mcp.internal:8765/mcp --token "$LEGAL_MCP_TOKEN"
+```
+
+## Smoke test
+
+Ask the AI client:
+
+```text
+查询 Mgame 项目的发行对接人，用于合同沟通。
+```
+
+Expected answer:
+
+```text
+发行对接人是沪小胖。
+```
+
+## Audit log
+
+Every MCP tool call writes to:
+
+```text
+/data/audit.jsonl
+```
+
+Each record includes timestamp, tool name, argument summary, rationale, source client, result status, and error code when applicable.
+
+## Operational rules
+
+- Rotate `LEGAL_MCP_TOKEN` if a team member leaves the pilot.
+- Keep `/data/legal.db` and `/data/audit.jsonl` on an encrypted disk or protected intranet server.
+- The v1.1 HTTP server is intended for trusted intranet use.
+- Use a reverse proxy with TLS before exposing the service beyond a trusted internal network.

@@ -74,3 +74,37 @@ Common client conventions:
 
 Supported setup clients are `claude`, `cursor`, `windsurf`, `vscode`, `codex`,
 and `generic`.
+
+## Team Deployment
+
+For a small team pilot, run one shared Legal-MCP HTTP server on an intranet host and let each team member connect through a local stdio proxy.
+
+Operator:
+
+```sh
+export LEGAL_MCP_TOKEN="replace-with-a-long-random-token"
+legal-mcp import project-ledger.xlsx --db /data/legal.db
+legal-mcp serve-http \
+  --host 0.0.0.0 \
+  --port 8765 \
+  --db /data/legal.db \
+  --audit-log /data/audit.jsonl \
+  --token "$LEGAL_MCP_TOKEN"
+```
+
+Team member:
+
+```sh
+legal-mcp setup \
+  --client codex \
+  --remote-url http://legal-mcp.internal:8765/mcp \
+  --token "$LEGAL_MCP_TOKEN"
+```
+
+Clients that use the generated stdio config will run:
+
+```sh
+legal-mcp proxy --url http://legal-mcp.internal:8765/mcp --token "$LEGAL_MCP_TOKEN"
+```
+
+See [Docs/team-deployment.md](Docs/team-deployment.md) for the full runbook.

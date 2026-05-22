@@ -26,6 +26,8 @@
 
 **Context:** v1 uses local stdio MCP plus one-line install to validate the core value quickly across desktop AI clients. Docker/HTTP is the natural next step for team deployment, but including it in v1 would slow down the first proof.
 
+**v1.1 status:** Selected as the next implementation milestone after successful real-project MCP query validation.
+
 **Depends on / blocked by:** v1 runs successfully for at least one or two real local users, and the team confirms shared legal context data is needed.
 
 ## OCR, PDF, and historical contract extraction
