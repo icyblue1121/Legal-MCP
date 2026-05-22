@@ -24,8 +24,8 @@ class AccessContext:
         api_key_id: int | None = None,
     ) -> "AccessContext":
         return cls(
-            user_id=user.get("id"),
-            role=user["role"],
+            user_id=int(user["id"]),
+            role=str(user["role"]),
             email=user.get("email"),
             api_key_id=api_key_id,
         )

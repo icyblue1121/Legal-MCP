@@ -12,7 +12,12 @@ from legal_mcp.identity import (
     ROLE_LEGAL,
     create_user,
 )
-from legal_mcp.policy import AccessContext, can_query_content, visible_project_ids
+from legal_mcp.policy import (
+    AccessContext,
+    can_query_content,
+    project_is_visible,
+    visible_project_ids,
+)
 
 
 @pytest.fixture()
@@ -61,6 +66,39 @@ def test_legal_and_admin_can_see_all_projects_and_query_content(
     assert visible_project_ids(conn, admin_context) == project_ids
 
 
+def test_from_user_normalizes_required_identity_fields() -> None:
+    context = AccessContext.from_user(
+        {"id": "42", "role": ROLE_BUSINESS, "email": "business@example.com"},
+        api_key_id=7,
+    )
+
+    assert context.user_id == 42
+    assert context.role == ROLE_BUSINESS
+    assert context.email == "business@example.com"
+    assert context.api_key_id == 7
+
+
+def test_legacy_context_is_unrestricted_and_can_query_content(
+    conn: sqlite3.Connection,
+) -> None:
+    project_id = _project(conn, "GAME-001")
+    context = AccessContext.legacy()
+
+    assert can_query_content(context) is True
+    assert visible_project_ids(conn, context) is None
+    assert project_is_visible(conn, context, project_id) is True
+
+
+def test_none_context_is_unrestricted_and_can_query_content(
+    conn: sqlite3.Connection,
+) -> None:
+    project_id = _project(conn, "GAME-001")
+
+    assert can_query_content(None) is True
+    assert visible_project_ids(conn, None) is None
+    assert project_is_visible(conn, None, project_id) is True
+
+
 def test_business_can_see_only_project_access_grants_and_query_content(
     conn: sqlite3.Connection,
 ) -> None:
@@ -92,6 +130,25 @@ def test_business_can_see_only_project_access_grants_and_query_content(
     assert can_query_content(context) is True
     assert visible_project_ids(conn, context) == {visible_project_id}
     assert hidden_project_id not in visible_project_ids(conn, context)
+    assert project_is_visible(conn, context, visible_project_id) is True
+    assert project_is_visible(conn, context, hidden_project_id) is False
+
+
+def test_business_with_no_grants_gets_empty_visible_project_ids(
+    conn: sqlite3.Connection,
+) -> None:
+    project_id = _project(conn, "GAME-001")
+    business_user = create_user(
+        conn,
+        email="business@example.com",
+        display_name="Business User",
+        role=ROLE_BUSINESS,
+    )
+
+    context = AccessContext.from_user(business_user)
+
+    assert visible_project_ids(conn, context) == set()
+    assert project_is_visible(conn, context, project_id) is False
 
 
 def test_auditor_visible_project_ids_is_empty_and_cannot_query_content(
