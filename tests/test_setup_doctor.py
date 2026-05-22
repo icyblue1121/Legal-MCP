@@ -3,6 +3,7 @@ import tomllib
 
 from legal_mcp.doctor import check_install_health
 from legal_mcp.setup_wizard import (
+    build_proxy_server_config,
     build_stdio_server_config,
     write_claude_config,
     write_codex_config,
@@ -28,6 +29,26 @@ def test_build_stdio_server_config_uses_serve_command_and_paths(tmp_path) -> Non
             str(database_path),
             "--audit-log",
             str(audit_path),
+        ],
+    }
+
+
+def test_build_stdio_server_config_can_use_remote_proxy() -> None:
+    config = build_proxy_server_config(
+        remote_url="http://legal.internal:8765/mcp",
+        token="secret-token",
+        command="legal-mcp",
+    )
+
+    assert config == {
+        "type": "stdio",
+        "command": "legal-mcp",
+        "args": [
+            "proxy",
+            "--url",
+            "http://legal.internal:8765/mcp",
+            "--token",
+            "secret-token",
         ],
     }
 
@@ -103,6 +124,35 @@ def test_doctor_reports_missing_database_and_healthy_database(tmp_path) -> None:
     db.initialize_database(database_path)
     healthy = check_install_health(database_path=database_path)
     assert healthy.healthy
+
+
+def test_doctor_can_check_remote_http_health(monkeypatch, tmp_path) -> None:
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            return json.dumps({"service": "legal-mcp", "database": "ready"}).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        assert request.full_url == "http://legal.internal:8765/healthz"
+        return FakeResponse()
+
+    monkeypatch.setattr("legal_mcp.doctor.urllib.request.urlopen", fake_urlopen)
+
+    report = check_install_health(
+        database_path=tmp_path / "unused.db",
+        config_path=None,
+        remote_url="http://legal.internal:8765/mcp",
+    )
+
+    assert report.healthy is True
+    assert any("remote HTTP server is healthy" in check.message for check in report.checks)
 
 
 def test_doctor_validates_config_contains_legal_mcp_server(tmp_path) -> None:

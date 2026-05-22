@@ -59,6 +59,25 @@ def build_stdio_server_config(
     }
 
 
+def build_proxy_server_config(
+    *,
+    remote_url: str,
+    token: str,
+    command: str = SERVER_NAME,
+) -> dict[str, Any]:
+    return {
+        "type": "stdio",
+        "command": command,
+        "args": [
+            "proxy",
+            "--url",
+            remote_url,
+            "--token",
+            token,
+        ],
+    }
+
+
 def configure_client(
     client: str,
     *,
@@ -66,21 +85,33 @@ def configure_client(
     database_path: str | Path = DEFAULT_DATABASE_PATH,
     audit_path: str | Path = DEFAULT_AUDIT_PATH,
     command: str = SERVER_NAME,
+    remote_url: str | None = None,
+    token: str | None = None,
 ) -> Path:
-    initialize_database(database_path)
+    if remote_url:
+        if not token:
+            raise ValueError("token is required when remote_url is provided")
+        server_config = build_proxy_server_config(
+            remote_url=remote_url,
+            token=token,
+            command=command,
+        )
+    else:
+        initialize_database(database_path)
+        server_config = build_stdio_server_config(database_path, audit_path, command=command)
     path = Path(config_path) if config_path is not None else default_config_path(client)
     if client == "claude":
-        write_claude_config(path, database_path, audit_path, command=command)
+        write_claude_config(path, database_path, audit_path, command=command, server_config=server_config)
     elif client == "cursor":
-        write_cursor_config(path, database_path, audit_path, command=command)
+        write_cursor_config(path, database_path, audit_path, command=command, server_config=server_config)
     elif client == "windsurf":
-        write_windsurf_config(path, database_path, audit_path, command=command)
+        write_windsurf_config(path, database_path, audit_path, command=command, server_config=server_config)
     elif client == "vscode":
-        write_vscode_config(path, database_path, audit_path, command=command)
+        write_vscode_config(path, database_path, audit_path, command=command, server_config=server_config)
     elif client == "codex":
-        write_codex_config(path, database_path, audit_path, command=command)
+        write_codex_config(path, database_path, audit_path, command=command, server_config=server_config)
     elif client == "generic":
-        write_generic_stdio_config(path, database_path, audit_path, command=command)
+        write_generic_stdio_config(path, database_path, audit_path, command=command, server_config=server_config)
     else:
         raise ValueError(f"unknown client: {client}")
     return path
@@ -92,8 +123,11 @@ def write_claude_config(
     audit_path: str | Path = DEFAULT_AUDIT_PATH,
     *,
     command: str = SERVER_NAME,
+    server_config: dict[str, Any] | None = None,
 ) -> None:
-    _write_json_mcp_config(config_path, database_path, audit_path, command=command)
+    _write_json_mcp_config(
+        config_path, database_path, audit_path, command=command, server_config=server_config
+    )
 
 
 def write_cursor_config(
@@ -102,8 +136,11 @@ def write_cursor_config(
     audit_path: str | Path = DEFAULT_AUDIT_PATH,
     *,
     command: str = SERVER_NAME,
+    server_config: dict[str, Any] | None = None,
 ) -> None:
-    _write_json_mcp_config(config_path, database_path, audit_path, command=command)
+    _write_json_mcp_config(
+        config_path, database_path, audit_path, command=command, server_config=server_config
+    )
 
 
 def write_windsurf_config(
@@ -112,8 +149,11 @@ def write_windsurf_config(
     audit_path: str | Path = DEFAULT_AUDIT_PATH,
     *,
     command: str = SERVER_NAME,
+    server_config: dict[str, Any] | None = None,
 ) -> None:
-    _write_json_mcp_config(config_path, database_path, audit_path, command=command)
+    _write_json_mcp_config(
+        config_path, database_path, audit_path, command=command, server_config=server_config
+    )
 
 
 def write_vscode_config(
@@ -122,6 +162,7 @@ def write_vscode_config(
     audit_path: str | Path = DEFAULT_AUDIT_PATH,
     *,
     command: str = SERVER_NAME,
+    server_config: dict[str, Any] | None = None,
 ) -> None:
     path = Path(config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -130,10 +171,8 @@ def write_vscode_config(
     else:
         config = {}
     servers = config.setdefault("servers", {})
-    servers[SERVER_NAME] = build_stdio_server_config(
-        database_path,
-        audit_path,
-        command=command,
+    servers[SERVER_NAME] = server_config or build_stdio_server_config(
+        database_path, audit_path, command=command
     )
     path.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -144,12 +183,11 @@ def write_generic_stdio_config(
     audit_path: str | Path = DEFAULT_AUDIT_PATH,
     *,
     command: str = SERVER_NAME,
+    server_config: dict[str, Any] | None = None,
 ) -> None:
     path = Path(config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    config = {
-        SERVER_NAME: build_stdio_server_config(database_path, audit_path, command=command)
-    }
+    config = {SERVER_NAME: server_config or build_stdio_server_config(database_path, audit_path, command=command)}
     path.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
@@ -159,12 +197,13 @@ def write_codex_config(
     audit_path: str | Path = DEFAULT_AUDIT_PATH,
     *,
     command: str = SERVER_NAME,
+    server_config: dict[str, Any] | None = None,
 ) -> None:
     path = Path(config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     existing = path.read_text(encoding="utf-8") if path.exists() else ""
     cleaned = _remove_toml_table(existing, f"mcp_servers.{SERVER_NAME}").rstrip()
-    server_config = build_stdio_server_config(database_path, audit_path, command=command)
+    server_config = server_config or build_stdio_server_config(database_path, audit_path, command=command)
     block = [
         f'[mcp_servers."{SERVER_NAME}"]',
         f'command = "{_toml_escape(server_config["command"])}"',
@@ -183,6 +222,7 @@ def _write_json_mcp_config(
     audit_path: str | Path,
     *,
     command: str,
+    server_config: dict[str, Any] | None = None,
 ) -> None:
     path = Path(config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -191,10 +231,8 @@ def _write_json_mcp_config(
     else:
         config = {}
     mcp_servers = config.setdefault("mcpServers", {})
-    mcp_servers[SERVER_NAME] = build_stdio_server_config(
-        database_path,
-        audit_path,
-        command=command,
+    mcp_servers[SERVER_NAME] = server_config or build_stdio_server_config(
+        database_path, audit_path, command=command
     )
     path.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 

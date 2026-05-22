@@ -45,6 +45,33 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_AUDIT_PATH,
         help="Audit log JSONL path",
     )
+    serve_http_parser = subparsers.add_parser("serve-http", help="Run the HTTP MCP server")
+    serve_http_parser.add_argument("--host", default="127.0.0.1")
+    serve_http_parser.add_argument("--port", type=int, default=8765)
+    serve_http_parser.add_argument(
+        "--db",
+        type=Path,
+        default=DEFAULT_DATABASE_PATH,
+        help=f"SQLite database path (default: {DEFAULT_DATABASE_PATH})",
+    )
+    serve_http_parser.add_argument(
+        "--audit-log",
+        type=Path,
+        default=DEFAULT_AUDIT_PATH,
+        help="Audit log JSONL path",
+    )
+    serve_http_parser.add_argument("--token", required=True, help="Bearer token required by clients")
+    serve_http_parser.add_argument(
+        "--allow-origin",
+        dest="allowed_origins",
+        action="append",
+        default=[],
+        help="Allowed browser Origin. Repeat for multiple origins.",
+    )
+    proxy_parser = subparsers.add_parser("proxy", help="Proxy local stdio MCP to a remote HTTP MCP server")
+    proxy_parser.add_argument("--url", required=True, help="Remote HTTP MCP endpoint URL")
+    proxy_parser.add_argument("--token", required=True, help="Bearer token for remote HTTP MCP server")
+    proxy_parser.add_argument("--timeout", type=float, default=30)
     setup_parser = subparsers.add_parser("setup", help="Configure a local MCP client")
     setup_parser.add_argument(
         "--client",
@@ -70,6 +97,8 @@ def build_parser() -> argparse.ArgumentParser:
         default="legal-mcp",
         help="Command clients should run to start Legal-MCP",
     )
+    setup_parser.add_argument("--remote-url", help="Remote HTTP MCP endpoint for team proxy mode")
+    setup_parser.add_argument("--token", help="Bearer token for remote HTTP MCP endpoint")
     doctor_parser = subparsers.add_parser("doctor", help="Validate local install health")
     doctor_parser.add_argument(
         "--db",
@@ -78,6 +107,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"SQLite database path (default: {DEFAULT_DATABASE_PATH})",
     )
     doctor_parser.add_argument("--config", type=Path, help="Optional client config path to check")
+    doctor_parser.add_argument("--remote-url", help="Remote HTTP MCP endpoint to check")
     return parser
 
 
@@ -93,6 +123,23 @@ def main(argv: list[str] | None = None) -> int:
 
         serve(args.db, args.audit_log, sys.stdin.buffer, sys.stdout.buffer, sys.stderr)
         return 0
+    if args.command == "serve-http":
+        from legal_mcp.http_server import serve_http
+
+        serve_http(
+            host=args.host,
+            port=args.port,
+            database_path=args.db,
+            audit_path=args.audit_log,
+            bearer_token=args.token,
+            allowed_origins=tuple(args.allowed_origins),
+        )
+        return 0
+    if args.command == "proxy":
+        from legal_mcp.proxy import proxy_stdio
+
+        proxy_stdio(url=args.url, token=args.token, timeout=args.timeout)
+        return 0
     if args.command == "setup":
         from legal_mcp.setup_wizard import configure_client
 
@@ -103,6 +150,8 @@ def main(argv: list[str] | None = None) -> int:
             database_path=args.db,
             audit_path=args.audit_log,
             command=args.server_command,
+            remote_url=args.remote_url,
+            token=args.token,
         )
         print(f"Configured {client}: {config_path}")
         print(f"Database ready: {args.db}")
@@ -111,7 +160,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "doctor":
         from legal_mcp.doctor import check_install_health
 
-        report = check_install_health(database_path=args.db, config_path=args.config)
+        report = check_install_health(
+            database_path=args.db,
+            config_path=args.config,
+            remote_url=args.remote_url,
+        )
         status = "healthy" if report.healthy else "unhealthy"
         print(f"Legal-MCP doctor: {status}")
         for check in report.checks:
