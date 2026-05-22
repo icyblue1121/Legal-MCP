@@ -21,6 +21,14 @@ def decode_messages(data: bytes) -> list[dict]:
     return messages
 
 
+def encode_jsonl_message(payload: dict) -> bytes:
+    return json.dumps(payload).encode("utf-8") + b"\n"
+
+
+def decode_jsonl_messages(data: bytes) -> list[dict]:
+    return [json.loads(line) for line in data.splitlines() if line]
+
+
 def test_stdio_server_lists_tools_and_calls_get_project_context(tmp_path) -> None:
     database_path = tmp_path / "legal.db"
     audit_path = tmp_path / "audit.jsonl"
@@ -97,3 +105,54 @@ def test_stdio_server_lists_tools_and_calls_get_project_context(tmp_path) -> Non
     content = json.loads(call_response["result"]["content"][0]["text"])
     assert content["project"]["project_code"] == "GAME-001"
     assert audit_path.exists()
+
+
+def test_stdio_server_supports_jsonl_framing(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    audit_path = tmp_path / "audit.jsonl"
+    db.initialize_database(database_path)
+
+    request_bytes = b"".join(
+        [
+            encode_jsonl_message(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "pytest", "version": "0"},
+                    },
+                }
+            ),
+            encode_jsonl_message({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+            encode_jsonl_message({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+        ]
+    )
+
+    process = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "legal_mcp.mcp_server",
+            "--db",
+            str(database_path),
+            "--audit-log",
+            str(audit_path),
+        ],
+        input=request_bytes,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+
+    responses = decode_jsonl_messages(process.stdout)
+    assert responses[0]["result"]["serverInfo"]["name"] == "legal-mcp"
+    tools_response = next(response for response in responses if response.get("id") == 2)
+    assert {tool["name"] for tool in tools_response["result"]["tools"]} == {
+        "list_projects",
+        "get_project_context",
+        "list_expiring_licenses",
+        "list_open_risks",
+    }
