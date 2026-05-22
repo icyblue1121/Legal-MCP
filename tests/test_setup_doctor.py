@@ -5,6 +5,7 @@ from legal_mcp.doctor import check_install_health
 from legal_mcp.setup_wizard import (
     build_proxy_server_config,
     build_stdio_server_config,
+    configure_client,
     write_claude_config,
     write_codex_config,
     write_cursor_config,
@@ -110,6 +111,49 @@ def test_generic_stdio_writer_outputs_server_config(tmp_path) -> None:
 
     config = json.loads(config_path.read_text(encoding="utf-8"))
     assert config["legal-mcp"]["type"] == "stdio"
+
+
+def test_configure_claude_code_uses_claude_mcp_user_scope(monkeypatch) -> None:
+    commands = []
+
+    monkeypatch.setattr("legal_mcp.setup_wizard.shutil.which", lambda command: f"C:/Tools/{command}.exe")
+
+    def fake_run(command, **kwargs):
+        commands.append((command, kwargs))
+        class CompletedProcess:
+            returncode = 0
+
+        return CompletedProcess()
+
+    monkeypatch.setattr("legal_mcp.setup_wizard.subprocess.run", fake_run)
+
+    config_path = configure_client(
+        "claude-code",
+        remote_url="http://10.236.36.71:8765/mcp",
+        token="secret-token",
+    )
+
+    assert str(config_path).endswith(".claude.json")
+    assert commands[0][0] == ["C:/Tools/claude.exe", "mcp", "remove", "legal-mcp"]
+    assert commands[0][1]["check"] is False
+    assert commands[1][0] == [
+        "C:/Tools/claude.exe",
+        "mcp",
+        "add",
+        "--transport",
+        "stdio",
+        "--scope",
+        "user",
+        "legal-mcp",
+        "--",
+        "C:/Tools/legal-mcp.exe",
+        "proxy",
+        "--url",
+        "http://10.236.36.71:8765/mcp",
+        "--token",
+        "secret-token",
+    ]
+    assert commands[1][1]["check"] is True
 
 
 def test_doctor_reports_missing_database_and_healthy_database(tmp_path) -> None:

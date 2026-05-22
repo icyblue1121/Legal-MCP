@@ -12,7 +12,7 @@ from legal_mcp.import_pipeline import import_file
 
 
 DEFAULT_DATABASE_PATH = Path.home() / ".legal-mcp" / "legal.db"
-SETUP_CLIENTS = ("claude", "cursor", "windsurf", "vscode", "codex", "generic")
+SETUP_CLIENTS = ("claude", "claude-code", "cursor", "windsurf", "vscode", "codex", "generic")
 
 
 def build_parser() -> argparse.ArgumentParser:

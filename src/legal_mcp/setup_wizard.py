@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import platform
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +18,8 @@ SERVER_NAME = "legal-mcp"
 
 def default_config_path(client: str) -> Path:
     home = Path.home()
+    if client == "claude-code":
+        return home / ".claude.json"
     if client == "claude":
         if platform.system() == "Darwin":
             return home / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
@@ -102,6 +106,8 @@ def configure_client(
     path = Path(config_path) if config_path is not None else default_config_path(client)
     if client == "claude":
         write_claude_config(path, database_path, audit_path, command=command, server_config=server_config)
+    elif client == "claude-code":
+        configure_claude_code(server_config)
     elif client == "cursor":
         write_cursor_config(path, database_path, audit_path, command=command, server_config=server_config)
     elif client == "windsurf":
@@ -115,6 +121,35 @@ def configure_client(
     else:
         raise ValueError(f"unknown client: {client}")
     return path
+
+
+def configure_claude_code(server_config: dict[str, Any]) -> None:
+    claude_command = _resolve_command("claude")
+    server_command = _resolve_command(str(server_config["command"]))
+    args = [str(arg) for arg in server_config.get("args", [])]
+
+    subprocess.run(
+        [claude_command, "mcp", "remove", SERVER_NAME],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    subprocess.run(
+        [
+            claude_command,
+            "mcp",
+            "add",
+            "--transport",
+            "stdio",
+            "--scope",
+            "user",
+            SERVER_NAME,
+            "--",
+            server_command,
+            *args,
+        ],
+        check=True,
+    )
 
 
 def write_claude_config(
@@ -255,3 +290,7 @@ def _remove_toml_table(content: str, table_name: str) -> str:
 
 def _toml_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _resolve_command(command: str) -> str:
+    return shutil.which(command) or command

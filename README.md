@@ -28,8 +28,9 @@ LEGAL_MCP_PACKAGE=. ./install.sh --client cursor
 ## Common Commands
 
 Run `legal-mcp setup --client CLIENT` to write a local stdio MCP server config.
-Supported clients are `claude`, `cursor`, `windsurf`, `vscode`, `codex`, and
-`generic`. You can re-run setup later to repair or update the config.
+Supported clients are `claude`, `claude-code`, `cursor`, `windsurf`, `vscode`,
+`codex`, and `generic`. Use `claude` for Claude Desktop and `claude-code` for
+Claude Code. You can re-run setup later to repair or update the config.
 
 Import legal project data from CSV or XLSX:
 
@@ -64,13 +65,14 @@ Common client conventions:
 | Client | Default config path | Server map key |
 | --- | --- | --- |
 | Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS | `mcpServers` |
+| Claude Code | `~/.claude.json` via `claude mcp add --scope user` | `mcpServers` |
 | Cursor | `~/.cursor/mcp.json` | `mcpServers` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | `mcpServers` |
 | VS Code / GitHub Copilot | `~/Library/Application Support/Code/User/mcp.json` on macOS | `servers` |
 | Codex | `~/.codex/config.toml` | `mcp_servers` |
 
-Supported setup clients are `claude`, `cursor`, `windsurf`, `vscode`, `codex`,
-and `generic`.
+Supported setup clients are `claude`, `claude-code`, `cursor`, `windsurf`,
+`vscode`, `codex`, and `generic`.
 
 ## Team Deployment
 
@@ -102,6 +104,17 @@ Clients that use the generated stdio config will run:
 
 ```sh
 legal-mcp proxy --url http://legal-mcp.internal:8765/mcp --token "$LEGAL_MCP_TOKEN"
+```
+
+Claude Code users should choose `claude-code` instead of `claude`:
+
+```sh
+legal-mcp setup \
+  --client claude-code \
+  --remote-url http://legal-mcp.internal:8765/mcp \
+  --token "$LEGAL_MCP_TOKEN"
+
+claude mcp list
 ```
 
 Keep deployment notes that contain hostnames, client paths, tokens, or real data

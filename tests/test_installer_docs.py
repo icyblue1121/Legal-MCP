@@ -22,6 +22,7 @@ def test_readme_documents_phase_6_commands() -> None:
 
     assert "uv tool install --upgrade legal-mcp" in readme
     assert "./install.sh --client cursor" in readme
+    assert "--client claude-code" in readme
     assert "legal-mcp setup" in readme
     assert "legal-mcp import" in readme
     assert "legal-mcp doctor" in readme

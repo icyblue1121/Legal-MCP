@@ -65,7 +65,7 @@ def test_cli_accepts_proxy_options() -> None:
 def test_cli_setup_accepts_common_ai_app_clients() -> None:
     parser = main.__globals__["build_parser"]()
 
-    for client in ["claude", "windsurf", "vscode"]:
+    for client in ["claude", "claude-code", "windsurf", "vscode"]:
         args = parser.parse_args(["setup", "--client", client])
         assert args.client == client
 
