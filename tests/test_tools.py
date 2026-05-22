@@ -253,6 +253,106 @@ def test_get_project_context_returns_not_found_for_hidden_project(tmp_path) -> N
     assert result["error"]["code"] == "not_found"
 
 
+def test_get_project_context_resolves_visible_candidate_when_hidden_name_is_ambiguous(
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        visible_project_id = seed_project(conn, code="GAME-001", name="Shared Name")
+        seed_project(conn, code="GAME-002", name="Shared Name")
+        business_user = create_user(
+            conn,
+            email="business@example.com",
+            display_name="Business User",
+            role=ROLE_BUSINESS,
+        )
+        grant_project_access(conn, user_id=business_user["id"], project_id=visible_project_id)
+        context = AccessContext.from_user(business_user)
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "get_project_context",
+        {"project_id_or_name": "Shared Name", "rationale": "review project context"},
+        database_path=database_path,
+        access_context=context,
+    )
+
+    assert result["project"]["project_code"] == "GAME-001"
+
+
+def test_get_project_context_ambiguous_candidates_include_only_visible_projects(
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        visible_project_id = seed_project(conn, code="GAME-001", name="Shared Name")
+        other_visible_project_id = seed_project(conn, code="GAME-002", name="Shared Name")
+        seed_project(conn, code="GAME-003", name="Shared Name")
+        business_user = create_user(
+            conn,
+            email="business@example.com",
+            display_name="Business User",
+            role=ROLE_BUSINESS,
+        )
+        grant_project_access(conn, user_id=business_user["id"], project_id=visible_project_id)
+        grant_project_access(
+            conn,
+            user_id=business_user["id"],
+            project_id=other_visible_project_id,
+        )
+        context = AccessContext.from_user(business_user)
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "get_project_context",
+        {"project_id_or_name": "Shared Name", "rationale": "review project context"},
+        database_path=database_path,
+        access_context=context,
+    )
+
+    assert result["error"]["code"] == "ambiguous_project"
+    assert [candidate["project_code"] for candidate in result["error"]["candidates"]] == [
+        "GAME-001",
+        "GAME-002",
+    ]
+
+
+def test_get_project_context_hidden_ambiguous_candidates_return_not_found(
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        seed_project(conn, code="GAME-001", name="Shared Name")
+        seed_project(conn, code="GAME-002", name="Shared Name")
+        business_user = create_user(
+            conn,
+            email="business@example.com",
+            display_name="Business User",
+            role=ROLE_BUSINESS,
+        )
+        context = AccessContext.from_user(business_user)
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "get_project_context",
+        {"project_id_or_name": "Shared Name", "rationale": "review project context"},
+        database_path=database_path,
+        access_context=context,
+    )
+
+    assert result["error"]["code"] == "not_found"
+    assert result["error"]["candidates"] == []
+
+
 def test_legal_user_sees_all_projects_without_grants(tmp_path) -> None:
     database_path = tmp_path / "legal.db"
     db.initialize_database(database_path)

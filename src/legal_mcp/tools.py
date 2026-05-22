@@ -157,10 +157,33 @@ def _get_project_context(
     if lookup.kind == ProjectLookupResult.NOT_FOUND:
         return _error("not_found", "project not found")
     if lookup.kind == ProjectLookupResult.AMBIGUOUS:
+        visible = visible_project_ids(conn, access_context)
+        if visible is None:
+            return _error(
+                "ambiguous_project",
+                "project lookup is ambiguous",
+                candidates=lookup.candidates or [],
+            )
+
+        visible_candidates = [
+            candidate
+            for candidate in lookup.candidates or []
+            if int(candidate["id"]) in visible
+        ]
+        if not visible_candidates:
+            return _error("not_found", "project not found")
+        if len(visible_candidates) == 1:
+            row = conn.execute(
+                "select * from projects where id = ?",
+                (visible_candidates[0]["id"],),
+            ).fetchone()
+            if row is None:
+                return _error("not_found", "project not found")
+            return _project_context(conn, dict(row))
         return _error(
             "ambiguous_project",
             "project lookup is ambiguous",
-            candidates=lookup.candidates or [],
+            candidates=visible_candidates,
         )
 
     project = lookup.project or {}
@@ -168,6 +191,11 @@ def _get_project_context(
     if not project_is_visible(conn, access_context, int(project_id)):
         return _error("not_found", "project not found")
 
+    return _project_context(conn, project)
+
+
+def _project_context(conn: sqlite3.Connection, project: dict[str, Any]) -> dict[str, Any]:
+    project_id = project["id"]
     licenses = conn.execute(
         "select * from licenses where project_id = ? order by external_key",
         (project_id,),
