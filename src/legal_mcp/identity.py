@@ -67,15 +67,18 @@ def verify_password(password: str, password_hash: str | None) -> bool:
     except (AttributeError, binascii.Error, ValueError, TypeError):
         return False
 
-    if algorithm != _PASSWORD_ALGORITHM or iterations <= 0:
+    if algorithm != _PASSWORD_ALGORITHM or iterations != _PASSWORD_ITERATIONS:
         return False
 
-    actual_digest = hashlib.pbkdf2_hmac(
-        "sha256",
-        password.encode("utf-8"),
-        salt,
-        iterations,
-    )
+    try:
+        actual_digest = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            salt,
+            iterations,
+        )
+    except OverflowError:
+        return False
     return hmac.compare_digest(actual_digest, expected_digest)
 
 
@@ -191,7 +194,6 @@ def verify_api_key(
             "display_name": row["display_name"],
             "role": row["role"],
             "status": row["user_status"],
-            "password_hash": row["password_hash"],
             "external_subject": row["external_subject"],
             "created_at": row["user_created_at"],
             "updated_at": row["user_updated_at"],
@@ -200,7 +202,6 @@ def verify_api_key(
             "id": row["api_key_id"],
             "user_id": row["api_key_user_id"],
             "key_prefix": row["key_prefix"],
-            "key_hash": row["key_hash"],
             "label": row["label"],
             "status": row["api_key_status"],
             "last_used_at": last_used_at,

@@ -43,6 +43,13 @@ def test_hash_password_verify_password_create_user_and_get_user(
     assert verify_password("anything", None) is False
     assert verify_password("anything", "pbkdf2_sha1$1$salt$digest") is False
     assert verify_password("anything", "not-a-valid-hash") is False
+    assert (
+        verify_password(
+            "anything",
+            "pbkdf2_sha256$999999999999999999999$YWJj$YWJj",
+        )
+        is False
+    )
 
     created = create_user(
         conn,
@@ -95,9 +102,11 @@ def test_create_api_key_returns_plaintext_once_and_verifies_user_key_and_role(
     assert verified is not None
     assert verified.user["id"] == user["id"]
     assert verified.user["role"] == ROLE_LEGAL
+    assert "password_hash" not in verified.user
     assert verified.api_key["id"] == created_key.api_key_id
     assert verified.api_key["key_prefix"] == created_key.prefix
     assert verified.api_key["last_used_at"] is not None
+    assert "key_hash" not in verified.api_key
     assert verify_api_key(conn, "lmcp_not-the-real-secret") is None
 
 
