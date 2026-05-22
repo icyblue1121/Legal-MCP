@@ -126,6 +126,28 @@ def test_write_audit_event_persists_disclosure_without_record_id(
     assert disclosure["record_id"] is None
 
 
+def test_write_audit_event_persists_without_context(
+    conn: sqlite3.Connection,
+) -> None:
+    event_id = write_audit_event(
+        conn,
+        context=None,
+        tool_name="list_public_projects",
+        rationale=None,
+        source_client="pytest",
+        arguments={},
+        result={"projects": []},
+        disclosures=[],
+    )
+
+    event = conn.execute(
+        "select user_id, api_key_id from audit_events where id = ?",
+        (event_id,),
+    ).fetchone()
+    assert event["user_id"] is None
+    assert event["api_key_id"] is None
+
+
 def test_list_audit_events_filters_by_project_id_and_returns_email_and_tool_name(
     conn: sqlite3.Connection,
 ) -> None:
@@ -181,3 +203,43 @@ def test_list_audit_events_filters_by_project_id_and_returns_email_and_tool_name
     assert len(rows) == 1
     assert rows[0]["email"] == "business@example.com"
     assert rows[0]["tool_name"] == "visible_tool"
+
+
+@pytest.mark.parametrize("limit", [-10, 0])
+def test_list_audit_events_normalizes_non_positive_limits(
+    conn: sqlite3.Connection,
+    limit: int,
+) -> None:
+    for index in range(2):
+        write_audit_event(
+            conn,
+            context=None,
+            tool_name=f"tool_{index}",
+            rationale=None,
+            source_client=None,
+            arguments={},
+            result={"projects": []},
+            disclosures=[],
+        )
+
+    rows = list_audit_events(conn, limit=limit)
+
+    assert len(rows) == 1
+
+
+def test_list_audit_events_caps_large_limits(conn: sqlite3.Connection) -> None:
+    for index in range(501):
+        write_audit_event(
+            conn,
+            context=None,
+            tool_name=f"tool_{index}",
+            rationale=None,
+            source_client=None,
+            arguments={},
+            result={"projects": []},
+            disclosures=[],
+        )
+
+    rows = list_audit_events(conn, limit=9999)
+
+    assert len(rows) == 500

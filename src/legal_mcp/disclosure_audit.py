@@ -21,7 +21,7 @@ class Disclosure:
 
 def write_audit_event(
     conn: sqlite3.Connection,
-    context: AccessContext,
+    context: AccessContext | None,
     tool_name: str,
     rationale: str | None,
     source_client: str | None,
@@ -33,6 +33,8 @@ def write_audit_event(
     error = result.get("error")
     result_status = "error" if error else "success"
     error_code = error.get("code") if isinstance(error, dict) else None
+    user_id = context.user_id if context is not None else None
+    api_key_id = context.api_key_id if context is not None else None
 
     cursor = conn.execute(
         """
@@ -50,8 +52,8 @@ def write_audit_event(
         values (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            context.user_id,
-            context.api_key_id,
+            user_id,
+            api_key_id,
             source_client,
             tool_name,
             rationale,
@@ -121,6 +123,7 @@ def list_audit_events(
         filters.append("audit_events.tool_name = ?")
         params.append(tool_name)
 
+    normalized_limit = _normalize_limit(limit)
     where_clause = f"where {' and '.join(filters)}" if filters else ""
     rows = conn.execute(
         f"""
@@ -133,7 +136,7 @@ def list_audit_events(
         order by audit_events.timestamp desc, audit_events.id desc
         limit ?
         """,
-        (*params, limit),
+        (*params, normalized_limit),
     ).fetchall()
     return [dict(row) for row in rows]
 
@@ -149,3 +152,7 @@ def _count_records(result: dict[str, Any]) -> int:
         elif isinstance(value, dict):
             count += 1
     return count
+
+
+def _normalize_limit(limit: int) -> int:
+    return min(max(int(limit), 1), 500)
