@@ -34,3 +34,26 @@ legal-mcp doctor
 
 If the client supports manually adding MCP servers, use the generic stdio config
 or point it at `legal-mcp serve`.
+
+## Remote proxy mode
+
+For team deployments, each desktop client can keep using a local stdio MCP entry while forwarding requests to the shared intranet Legal-MCP server.
+
+```sh
+legal-mcp setup \
+  --client codex \
+  --remote-url http://legal-mcp.internal:8765/mcp \
+  --token "$LEGAL_MCP_TOKEN"
+```
+
+The generated server command is:
+
+```sh
+legal-mcp proxy --url http://legal-mcp.internal:8765/mcp --token "$LEGAL_MCP_TOKEN"
+```
+
+Run a remote health check:
+
+```sh
+legal-mcp doctor --remote-url http://legal-mcp.internal:8765/mcp
+```

@@ -1,0 +1,13 @@
+services:
+  legal-mcp:
+    build: .
+    ports:
+      - "8765:8765"
+    environment:
+      LEGAL_MCP_TOKEN: "${LEGAL_MCP_TOKEN}"
+    volumes:
+      - ./data:/data
+    command:
+      - sh
+      - -c
+      - legal-mcp serve-http --host 0.0.0.0 --port 8765 --db /data/legal.db --audit-log /data/audit.jsonl --token "$$LEGAL_MCP_TOKEN"
