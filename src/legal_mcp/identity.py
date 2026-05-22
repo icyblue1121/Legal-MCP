@@ -90,11 +90,10 @@ def create_user(
     email: str,
     display_name: str,
     role: str,
-    password: str | None = None,
+    password_hash: str | None = None,
     external_subject: str | None = None,
 ) -> dict[str, Any]:
     """Create an active local user and return the stored user row."""
-    password_hash = hash_password(password) if password is not None else None
     cursor = conn.execute(
         """
         insert into users (email, display_name, role, status, password_hash, external_subject)

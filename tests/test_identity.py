@@ -49,14 +49,15 @@ def test_hash_password_verify_password_create_user_and_get_user(
         email="admin@example.com",
         display_name="Admin User",
         role=ROLE_ADMIN,
-        password="admin-password",
+        password_hash=password_hash,
     )
 
     assert created["email"] == "admin@example.com"
     assert created["display_name"] == "Admin User"
     assert created["role"] == ROLE_ADMIN
     assert created["status"] == ACTIVE
-    assert verify_password("admin-password", created["password_hash"]) is True
+    assert created["password_hash"] == password_hash
+    assert verify_password("correct horse battery staple", created["password_hash"]) is True
     assert get_user(conn, created["id"]) == created
 
     with pytest.raises(LookupError):
@@ -66,12 +67,13 @@ def test_hash_password_verify_password_create_user_and_get_user(
 def test_create_api_key_returns_plaintext_once_and_verifies_user_key_and_role(
     conn: sqlite3.Connection,
 ) -> None:
+    password_hash = hash_password("legal-password")
     user = create_user(
         conn,
         email="legal@example.com",
         display_name="Legal User",
         role=ROLE_LEGAL,
-        password="legal-password",
+        password_hash=password_hash,
     )
 
     created_key = create_api_key(conn, user_id=user["id"], label="local dev")
@@ -102,12 +104,13 @@ def test_create_api_key_returns_plaintext_once_and_verifies_user_key_and_role(
 def test_revoked_api_key_and_disabled_user_credentials_do_not_verify(
     conn: sqlite3.Connection,
 ) -> None:
+    business_password_hash = hash_password("business-password")
     business_user = create_user(
         conn,
         email="business@example.com",
         display_name="Business User",
         role=ROLE_BUSINESS,
-        password="business-password",
+        password_hash=business_password_hash,
     )
     revoked_key = create_api_key(conn, user_id=business_user["id"], label="revoked")
     conn.execute(
@@ -118,12 +121,13 @@ def test_revoked_api_key_and_disabled_user_credentials_do_not_verify(
 
     assert verify_api_key(conn, revoked_key.plaintext) is None
 
+    disabled_password_hash = hash_password("disabled-password")
     disabled_user = create_user(
         conn,
         email="disabled@example.com",
         display_name="Disabled User",
         role=ROLE_BUSINESS,
-        password="disabled-password",
+        password_hash=disabled_password_hash,
     )
     disabled_key = create_api_key(conn, user_id=disabled_user["id"], label="disabled")
     conn.execute(
