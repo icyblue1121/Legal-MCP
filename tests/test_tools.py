@@ -169,6 +169,51 @@ def test_expiring_license_boundaries_exclude_null_and_late_dates(tmp_path) -> No
     ]
 
 
+def test_list_expiring_licenses_filters_to_business_project_access_grants(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    expiry_date = (date.today() + timedelta(days=7)).isoformat()
+    conn = db.connect(database_path)
+    try:
+        visible_project_id = seed_project(conn, code="GAME-001", name="Visible Project")
+        hidden_project_id = seed_project(conn, code="GAME-002", name="Hidden Project")
+        conn.executemany(
+            """
+            insert into licenses (
+              project_id, external_key, license_type, identifier, expiry_date
+            )
+            values (?, ?, ?, ?, ?)
+            """,
+            [
+                (visible_project_id, "visible-license", "publication", "A", expiry_date),
+                (hidden_project_id, "hidden-license", "publication", "B", expiry_date),
+            ],
+        )
+        business_user = create_user(
+            conn,
+            email="business@example.com",
+            display_name="Business User",
+            role=ROLE_BUSINESS,
+        )
+        grant_project_access(conn, user_id=business_user["id"], project_id=visible_project_id)
+        context = AccessContext.from_user(business_user)
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "list_expiring_licenses",
+        {"days_ahead": 30, "rationale": "renewal planning"},
+        database_path=database_path,
+        access_context=context,
+    )
+
+    assert [license_["external_key"] for license_ in result["licenses"]] == [
+        "visible-license"
+    ]
+    assert [license_["project_code"] for license_ in result["licenses"]] == ["GAME-001"]
+
+
 def test_open_risks_exclude_closed_risks(tmp_path) -> None:
     database_path = tmp_path / "legal.db"
     db.initialize_database(database_path)
@@ -196,6 +241,56 @@ def test_open_risks_exclude_closed_risks(tmp_path) -> None:
     )
 
     assert [risk["external_key"] for risk in result["risks"]] == ["risk-open"]
+
+
+def test_list_open_risks_filters_to_business_project_access_grants(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        visible_project_id = seed_project(conn, code="GAME-001", name="Visible Project")
+        hidden_project_id = seed_project(conn, code="GAME-002", name="Hidden Project")
+        conn.executemany(
+            """
+            insert into risks (project_id, external_key, description, status)
+            values (?, ?, ?, ?)
+            """,
+            [
+                (visible_project_id, "visible-risk", "Needs review", "open"),
+                (hidden_project_id, "hidden-risk", "Also needs review", "open"),
+            ],
+        )
+        business_user = create_user(
+            conn,
+            email="business@example.com",
+            display_name="Business User",
+            role=ROLE_BUSINESS,
+        )
+        grant_project_access(conn, user_id=business_user["id"], project_id=visible_project_id)
+        context = AccessContext.from_user(business_user)
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "list_open_risks",
+        {"rationale": "prepare weekly summary"},
+        database_path=database_path,
+        access_context=context,
+    )
+    filtered_result = call_tool(
+        "list_open_risks",
+        {"project_code": "GAME-001", "rationale": "prepare weekly summary"},
+        database_path=database_path,
+        access_context=context,
+    )
+
+    assert [risk["external_key"] for risk in result["risks"]] == ["visible-risk"]
+    assert [risk["project_code"] for risk in result["risks"]] == ["GAME-001"]
+    assert [risk["external_key"] for risk in filtered_result["risks"]] == [
+        "visible-risk"
+    ]
+    assert [risk["project_code"] for risk in filtered_result["risks"]] == ["GAME-001"]
 
 
 def test_list_projects_filters_to_business_project_access_grants(tmp_path) -> None:
