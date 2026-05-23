@@ -13,6 +13,7 @@ from legal_mcp import db
 from legal_mcp.identity import verify_api_key
 from legal_mcp.mcp_protocol import handle_message
 from legal_mcp.policy import AccessContext
+from legal_mcp.startup import require_startup_checks
 
 
 class LegalMCPHTTPServer(ThreadingHTTPServer):
@@ -160,8 +161,9 @@ def serve_http(
     audit_path: str | Path,
     bearer_token: str,
     allowed_origins: tuple[str, ...],
+    update_check_url: str | None = None,
 ) -> None:
-    db.initialize_database(database_path)
+    require_startup_checks(database_path, remote_url=update_check_url)
     server = build_http_server(
         host=host,
         port=port,

@@ -1,3 +1,15 @@
+create table if not exists schema_version (
+  id integer primary key check (id = 1),
+  version integer not null,
+  updated_at text not null default (datetime('now'))
+);
+
+insert into schema_version (id, version)
+values (1, 13)
+on conflict(id) do update set
+  version = excluded.version,
+  updated_at = datetime('now');
+
 create table if not exists projects (
   id integer primary key,
   project_code text not null unique,

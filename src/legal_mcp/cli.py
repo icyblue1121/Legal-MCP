@@ -47,6 +47,10 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_AUDIT_PATH,
         help="Audit log JSONL path",
     )
+    serve_parser.add_argument(
+        "--update-check-url",
+        help="Optional JSON endpoint for non-blocking startup update notices.",
+    )
     serve_http_parser = subparsers.add_parser("serve-http", help="Run the HTTP MCP server")
     serve_http_parser.add_argument("--host", default="127.0.0.1")
     serve_http_parser.add_argument("--port", type=int, default=8765)
@@ -63,6 +67,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Audit log JSONL path",
     )
     serve_http_parser.add_argument("--token", required=True, help="Bearer token required by clients")
+    serve_http_parser.add_argument(
+        "--update-check-url",
+        help="Optional JSON endpoint for non-blocking startup update notices.",
+    )
     serve_http_parser.add_argument(
         "--allow-origin",
         dest="allowed_origins",
@@ -145,7 +153,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "serve":
         from legal_mcp.mcp_server import serve
 
-        serve(args.db, args.audit_log, sys.stdin.buffer, sys.stdout.buffer, sys.stderr)
+        serve(
+            args.db,
+            args.audit_log,
+            sys.stdin.buffer,
+            sys.stdout.buffer,
+            sys.stderr,
+            update_check_url=args.update_check_url,
+        )
         return 0
     if args.command == "serve-http":
         from legal_mcp.http_server import serve_http
@@ -157,6 +172,7 @@ def main(argv: list[str] | None = None) -> int:
             audit_path=args.audit_log,
             bearer_token=args.token,
             allowed_origins=tuple(args.allowed_origins),
+            update_check_url=args.update_check_url,
         )
         return 0
     if args.command == "serve-admin":
