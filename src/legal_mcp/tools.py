@@ -12,6 +12,7 @@ from legal_mcp import db
 from legal_mcp.audit import DEFAULT_AUDIT_PATH, write_audit_record
 from legal_mcp.disclosure_audit import Disclosure, write_audit_event
 from legal_mcp.lookup import ProjectLookupResult, lookup_project
+from legal_mcp.planner import plan_query
 from legal_mcp.policy import (
     AccessContext,
     can_query_content,
@@ -141,6 +142,19 @@ def call_tool(
         try:
             if tool_name == "list_projects":
                 result = _list_projects(conn, arguments, access_context)
+            elif tool_name == "plan_query":
+                question = arguments.get("question")
+                if not isinstance(question, str) or not question.strip():
+                    result = _error("validation_error", "question is required")
+                else:
+                    plan = plan_query(question)
+                    result = {
+                        "plan": {
+                            "tool_name": plan.tool_name,
+                            "arguments": plan.arguments,
+                            "reason": plan.reason,
+                        }
+                    }
             elif tool_name == "resolve_project":
                 result = resolve_project(conn, arguments, access_context)
             elif tool_name == "get_project_fields":

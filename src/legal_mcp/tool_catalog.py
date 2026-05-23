@@ -48,6 +48,16 @@ class ToolCapability:
 
 
 CATALOG: dict[str, ToolCapability] = {
+    "plan_query": ToolCapability(
+        name="plan_query",
+        description="Plan a user question into one minimum-disclosure tool call.",
+        data_domain="planner",
+        operation="read",
+        filters=("question",),
+        return_fields=("tool_name", "arguments", "reason"),
+        requires_project_scope=False,
+        result_kind="single",
+    ),
     "resolve_project": ToolCapability(
         name="resolve_project",
         description="Resolve a project by code, name, or alias.",
