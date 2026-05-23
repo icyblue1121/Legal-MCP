@@ -19,6 +19,19 @@ from legal_mcp.policy import (
     visible_project_ids,
 )
 
+PROJECT_FIELD_NAMES = {
+    "project_code",
+    "name",
+    "stage",
+    "legal_bp",
+    "department",
+    "release_team",
+    "contact_person",
+    "website",
+    "notes",
+}
+PROJECT_FIELD_IDENTITY_NAMES = ("project_code", "name")
+
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
@@ -41,6 +54,10 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "project_id_or_name": {"type": "string"},
+                "fields": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": sorted(PROJECT_FIELD_NAMES)},
+                },
                 "rationale": {"type": "string"},
                 "source_client": {"type": "string"},
             },
@@ -187,6 +204,9 @@ def _get_project_context(
     query = arguments.get("project_id_or_name")
     if not isinstance(query, str) or not query.strip():
         return _error("validation_error", "project_id_or_name is required")
+    fields = _requested_project_fields(arguments)
+    if fields == set():
+        return _error("validation_error", "fields must contain known project field names")
 
     lookup = lookup_project(conn, query)
     if lookup.kind == ProjectLookupResult.NOT_FOUND:
@@ -225,7 +245,7 @@ def _get_project_context(
             ).fetchone()
             if row is None:
                 return _error("not_found", "project not found")
-            return _project_context(conn, dict(row))
+            return _project_context(conn, dict(row), fields)
         return _error(
             "ambiguous_project",
             "project lookup is ambiguous",
@@ -246,10 +266,36 @@ def _get_project_context(
         )
         return _error("not_found", "project not found")
 
-    return _project_context(conn, project)
+    return _project_context(conn, project, fields)
 
 
-def _project_context(conn: sqlite3.Connection, project: dict[str, Any]) -> dict[str, Any]:
+def _requested_project_fields(arguments: dict[str, Any]) -> set[str] | None:
+    fields = arguments.get("fields")
+    if fields is None:
+        return None
+    if not isinstance(fields, list):
+        return set()
+    requested = {field for field in fields if isinstance(field, str)}
+    if len(requested) != len(fields) or not requested.issubset(PROJECT_FIELD_NAMES):
+        return set()
+    return requested
+
+
+def _project_context(
+    conn: sqlite3.Connection,
+    project: dict[str, Any],
+    fields: set[str] | None = None,
+) -> dict[str, Any]:
+    if fields is not None:
+        projected_fields = [*PROJECT_FIELD_IDENTITY_NAMES, *sorted(fields)]
+        return {
+            "project": {
+                field: project.get(field)
+                for field in projected_fields
+                if field in project
+            }
+        }
+
     project_id = project["id"]
     licenses = conn.execute(
         "select * from licenses where project_id = ? order by external_key",

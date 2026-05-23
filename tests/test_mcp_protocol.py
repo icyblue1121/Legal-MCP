@@ -65,6 +65,12 @@ def test_handle_tools_list_returns_legal_mcp_tools(tmp_path: Path) -> None:
         "list_expiring_licenses",
         "list_open_risks",
     ]
+    get_project_context = next(
+        tool for tool in response["result"]["tools"] if tool["name"] == "get_project_context"
+    )
+    fields_schema = get_project_context["inputSchema"]["properties"]["fields"]
+    assert fields_schema["type"] == "array"
+    assert "website" in fields_schema["items"]["enum"]
 
 
 def test_handle_tool_call_returns_json_text_content(tmp_path: Path) -> None:

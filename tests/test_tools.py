@@ -97,6 +97,36 @@ def test_get_project_context_includes_project_fields_and_all_licenses(tmp_path) 
     assert result["licenses"][0]["expiry_date"] is None
 
 
+def test_get_project_context_with_fields_returns_only_requested_project_fields(
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        seed_project(conn, code="MGAME", name="MGame")
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "get_project_context",
+        {
+            "project_id_or_name": "MGAME",
+            "fields": ["website"],
+            "rationale": "query official website",
+        },
+        database_path=database_path,
+    )
+
+    assert result == {
+        "project": {
+            "project_code": "MGAME",
+            "name": "MGame",
+            "website": "https://example.test",
+        }
+    }
+
+
 def test_ambiguous_project_context_returns_structured_error(tmp_path) -> None:
     database_path = tmp_path / "legal.db"
     db.initialize_database(database_path)
@@ -448,12 +478,12 @@ def test_get_project_context_hidden_ambiguous_candidates_return_not_found(
     assert result["error"]["candidates"] == []
 
 
-def test_legal_user_sees_all_projects_without_grants(tmp_path) -> None:
+def test_legal_user_list_projects_filters_to_project_access_grants(tmp_path) -> None:
     database_path = tmp_path / "legal.db"
     db.initialize_database(database_path)
     conn = db.connect(database_path)
     try:
-        seed_project(conn, code="GAME-001", name="First Project")
+        visible_project_id = seed_project(conn, code="GAME-001", name="First Project")
         seed_project(conn, code="GAME-002", name="Second Project")
         legal_user = create_user(
             conn,
@@ -461,21 +491,47 @@ def test_legal_user_sees_all_projects_without_grants(tmp_path) -> None:
             display_name="Legal User",
             role=ROLE_LEGAL,
         )
+        grant_project_access(conn, user_id=legal_user["id"], project_id=visible_project_id)
         context = AccessContext.from_user(legal_user)
     finally:
         conn.close()
 
     result = call_tool(
         "list_projects",
-        {"rationale": "review all projects"},
+        {"rationale": "review accessible projects"},
         database_path=database_path,
         access_context=context,
     )
 
-    assert [project["project_code"] for project in result["projects"]] == [
-        "GAME-001",
-        "GAME-002",
-    ]
+    assert [project["project_code"] for project in result["projects"]] == ["GAME-001"]
+
+
+def test_legal_user_get_project_context_returns_not_found_for_hidden_project(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        visible_project_id = seed_project(conn, code="MGAME", name="MGame")
+        seed_project(conn, code="OTHER", name="Other Project")
+        legal_user = create_user(
+            conn,
+            email="legal@test.com",
+            display_name="Legal User",
+            role=ROLE_LEGAL,
+        )
+        grant_project_access(conn, user_id=legal_user["id"], project_id=visible_project_id)
+        context = AccessContext.from_user(legal_user)
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "get_project_context",
+        {"project_id_or_name": "OTHER", "rationale": "review project context"},
+        database_path=database_path,
+        access_context=context,
+    )
+
+    assert result["error"]["code"] == "not_found"
 
 
 def test_auditor_cannot_call_content_tools(tmp_path) -> None:

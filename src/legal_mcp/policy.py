@@ -52,11 +52,11 @@ def visible_project_ids(
     if context is None or context.legacy_shared_token:
         return None
 
-    if context.role in {ROLE_ADMIN, ROLE_LEGAL}:
+    if context.role == ROLE_ADMIN:
         rows = conn.execute("select id from projects").fetchall()
         return {int(row["id"]) for row in rows}
 
-    if context.role == ROLE_BUSINESS and context.user_id is not None:
+    if context.role in {ROLE_BUSINESS, ROLE_LEGAL} and context.user_id is not None:
         rows = conn.execute(
             "select project_id from project_access where user_id = ?",
             (context.user_id,),
