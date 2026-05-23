@@ -9,7 +9,9 @@ from pathlib import Path
 from typing import Any
 
 from legal_mcp import db
+from legal_mcp.identity import verify_api_key
 from legal_mcp.mcp_protocol import handle_message
+from legal_mcp.policy import AccessContext
 
 
 class LegalMCPHTTPServer(ThreadingHTTPServer):
@@ -43,7 +45,8 @@ class LegalMCPHTTPRequestHandler(BaseHTTPRequestHandler):
         if self.path != "/mcp":
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
             return
-        if not self._is_authorized():
+        access_context = self._resolve_access_context()
+        if access_context is None:
             self._send_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
             return
         if not self._origin_allowed():
@@ -62,6 +65,7 @@ class LegalMCPHTTPRequestHandler(BaseHTTPRequestHandler):
             message,
             database_path=self.server.database_path,
             audit_path=self.server.audit_path,
+            access_context=access_context,
         )
         if response is None:
             self._send_json(HTTPStatus.ACCEPTED, {})
@@ -81,9 +85,28 @@ class LegalMCPHTTPRequestHandler(BaseHTTPRequestHandler):
                 {"service": "legal-mcp", "database": "unavailable"},
             )
 
-    def _is_authorized(self) -> bool:
-        expected = f"Bearer {self.server.bearer_token}"
-        return self.headers.get("Authorization") == expected
+    def _resolve_access_context(self) -> AccessContext | None:
+        authorization = self.headers.get("Authorization")
+        if authorization is None:
+            return None
+
+        scheme, _, token = authorization.partition(" ")
+        if scheme != "Bearer" or not token:
+            return None
+        if token == self.server.bearer_token:
+            return AccessContext.legacy()
+
+        conn = db.connect(self.server.database_path)
+        try:
+            verified = verify_api_key(conn, token)
+        finally:
+            conn.close()
+        if verified is None:
+            return None
+        return AccessContext.from_user(
+            verified.user,
+            api_key_id=verified.api_key["id"],
+        )
 
     def _origin_allowed(self) -> bool:
         origin = self.headers.get("Origin")

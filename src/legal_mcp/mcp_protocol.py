@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from legal_mcp import __version__
+from legal_mcp.policy import AccessContext
 from legal_mcp.tools import TOOL_DEFINITIONS, call_tool
 
 PROTOCOL_VERSION = "2024-11-05"
@@ -17,6 +18,7 @@ def handle_message(
     *,
     database_path: str | Path,
     audit_path: str | Path,
+    access_context: AccessContext | None = None,
 ) -> dict[str, Any] | None:
     request_id = message.get("id")
     method = message.get("method")
@@ -42,6 +44,7 @@ def handle_message(
             params.get("arguments") or {},
             database_path=database_path,
             audit_path=audit_path,
+            access_context=access_context,
         )
         return {
             "jsonrpc": "2.0",
