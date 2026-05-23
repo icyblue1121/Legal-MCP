@@ -107,6 +107,44 @@ def test_tool_call_writes_database_audit_event_and_project_disclosure(tmp_path) 
     assert disclosure["decision"] == "allowed"
 
 
+def test_project_field_query_records_allowed_field_disclosure(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    audit_path = tmp_path / "audit.jsonl"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        conn.execute(
+            "insert into projects (project_code, name, stage, website) values (?, ?, ?, ?)",
+            ("MGAME", "MGame", "live", "https://mgame.example"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "get_project_fields",
+        {
+            "project_id_or_name": "MGAME",
+            "fields": ["website"],
+            "rationale": "query website",
+        },
+        database_path=database_path,
+        audit_path=audit_path,
+    )
+
+    assert result["project"]["website"] == "https://mgame.example"
+    conn = db.connect(database_path)
+    try:
+        rows = conn.execute(
+            "select field_name, decision from audit_disclosures order by id"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert ("website", "allowed") in [
+        (row["field_name"], row["decision"]) for row in rows
+    ]
+
+
 def test_hidden_project_lookup_records_denied_disclosure_without_leaking_project(
     tmp_path,
 ) -> None:

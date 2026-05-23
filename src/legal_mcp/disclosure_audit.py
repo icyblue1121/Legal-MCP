@@ -17,6 +17,8 @@ class Disclosure:
     record_id: int | None
     decision: str
     reason: str
+    field_name: str | None = None
+    group_id: int | None = None
 
 
 def write_audit_event(
@@ -72,10 +74,12 @@ def write_audit_event(
           project_id,
           record_type,
           record_id,
+          field_name,
+          group_id,
           decision,
           reason
         )
-        values (?, ?, ?, ?, ?, ?)
+        values (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
@@ -83,6 +87,8 @@ def write_audit_event(
                 disclosure.project_id,
                 disclosure.record_type,
                 disclosure.record_id,
+                disclosure.field_name,
+                disclosure.group_id,
                 disclosure.decision,
                 disclosure.reason,
             )

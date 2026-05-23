@@ -123,6 +123,8 @@ EXPECTED_COLUMNS = {
         "project_id",
         "record_type",
         "record_id",
+        "field_name",
+        "group_id",
         "decision",
         "reason",
     ],
@@ -221,6 +223,22 @@ def test_contracts_table_has_contract_information_columns(tmp_path) -> None:
         "contract_number",
         "income_expense_type",
     }.issubset(columns)
+
+
+def test_audit_disclosures_tracks_fields_and_group_reason(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        columns = {
+            row["name"]
+            for row in conn.execute("pragma table_info(audit_disclosures)")
+        }
+    finally:
+        conn.close()
+
+    assert "field_name" in columns
+    assert "group_id" in columns
 
 
 def test_initialize_database_creates_required_tables_and_columns(tmp_path) -> None:

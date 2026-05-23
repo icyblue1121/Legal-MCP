@@ -177,6 +177,8 @@ create table if not exists audit_disclosures (
   project_id integer references projects(id),
   record_type text not null,
   record_id integer,
+  field_name text,
+  group_id integer references user_groups(id),
   decision text not null check (decision in ('allowed', 'denied')),
   reason text not null
 );

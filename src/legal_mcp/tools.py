@@ -159,8 +159,10 @@ def call_tool(
                 result = resolve_project(conn, arguments, access_context)
             elif tool_name == "get_project_fields":
                 result = get_project_fields(conn, arguments, access_context)
+                _append_project_field_disclosures(conn, arguments, result, disclosures)
             elif tool_name == "get_contract_fields":
                 result = get_contract_fields(conn, arguments, access_context)
+                _append_contract_field_disclosures(conn, arguments, result, disclosures)
             elif tool_name == "get_project_context":
                 result = _error(
                     "deprecated_tool",
@@ -517,6 +519,16 @@ def _disclosures_from_result(result: dict[str, Any]) -> list[Disclosure]:
         disclosure = _disclosure_from_record(project, "project", project)
         if disclosure is not None:
             disclosures.append(disclosure)
+            disclosures.extend(_field_disclosures(disclosure, project, {"id", "project_code", "name"}))
+
+    contract = result.get("contract")
+    if isinstance(contract, dict):
+        disclosure = _disclosure_from_record(contract, "contract", contract)
+        if disclosure is not None:
+            disclosures.append(disclosure)
+            disclosures.extend(
+                _field_disclosures(disclosure, contract, {"id", "contract_number", "title"})
+            )
 
     for project_record in result.get("projects", []):
         if isinstance(project_record, dict):
@@ -550,3 +562,75 @@ def _disclosure_from_record(
         decision="allowed",
         reason="project_visible",
     )
+
+
+def _field_disclosures(
+    base: Disclosure,
+    record: dict[str, Any],
+    identity_fields: set[str],
+) -> list[Disclosure]:
+    return [
+        Disclosure(
+            project_id=base.project_id,
+            record_type=base.record_type,
+            record_id=base.record_id,
+            decision=base.decision,
+            reason=base.reason,
+            field_name=field,
+            group_id=base.group_id,
+        )
+        for field in record
+        if field not in identity_fields
+    ]
+
+
+def _append_project_field_disclosures(
+    conn: sqlite3.Connection,
+    arguments: dict[str, Any],
+    result: dict[str, Any],
+    disclosures: list[Disclosure],
+) -> None:
+    project = result.get("project")
+    query = arguments.get("project_id_or_name")
+    if not isinstance(project, dict) or not isinstance(query, str):
+        return
+    lookup = lookup_project(conn, query)
+    if lookup.kind != ProjectLookupResult.FOUND or not lookup.project:
+        return
+    project_id = int(lookup.project["id"])
+    base = Disclosure(
+        project_id=project_id,
+        record_type="project",
+        record_id=project_id,
+        decision="allowed",
+        reason="project_visible",
+    )
+    disclosures.append(base)
+    disclosures.extend(_field_disclosures(base, project, {"project_code", "name"}))
+
+
+def _append_contract_field_disclosures(
+    conn: sqlite3.Connection,
+    arguments: dict[str, Any],
+    result: dict[str, Any],
+    disclosures: list[Disclosure],
+) -> None:
+    contract = result.get("contract")
+    contract_number = arguments.get("contract_number")
+    if not isinstance(contract, dict) or not isinstance(contract_number, str):
+        return
+    row = conn.execute(
+        "select id, project_id from contracts where contract_number = ? or external_key = ?",
+        (contract_number, contract_number),
+    ).fetchone()
+    if row is None:
+        return
+    base = Disclosure(
+        project_id=int(row["project_id"]),
+        record_type="contract",
+        record_id=int(row["id"]),
+        decision="allowed",
+        reason="project_visible",
+    )
+    disclosures.append(base)
+    disclosures.extend(_field_disclosures(base, contract, {"contract_number", "title"}))
