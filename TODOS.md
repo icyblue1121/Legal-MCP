@@ -68,6 +68,8 @@
 
 **Cons:** Adds user accounts, roles, permission boundaries, audit UI, log retention policy, and operational support.
 
-**Context:** v1 keeps the smallest useful audit seed: required `rationale` on every MCP tool call plus a local audit log. Full permissions and audit UI should wait until the product moves into team deployment.
+**v1.2 status:** Implemented local users, per-user API keys, project-level
+access grants, DB-backed disclosure audit, and a lightweight Admin Web UI for
+user, grant, key, and audit review workflows.
 
-**Depends on / blocked by:** Docker/HTTP or another shared team deployment mode is underway.
+**Post-v1.2:** Field-level permissions and SSO remain future enterprise work.

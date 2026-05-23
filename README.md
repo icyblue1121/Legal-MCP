@@ -117,5 +117,28 @@ legal-mcp setup \
 claude mcp list
 ```
 
+### v1.2 Named User Tokens
+
+The v1.1 shared-token HTTP setup remains available for small trusted pilots. For
+v1.2 enterprise permissions, bootstrap an admin user and run the Admin Web UI:
+
+```sh
+legal-mcp admin create-user \
+  --email admin@example.com \
+  --display-name "Admin User" \
+  --role admin \
+  --password "replace-with-a-long-random-password" \
+  --db /data/legal.db
+
+legal-mcp serve-admin \
+  --host 0.0.0.0 \
+  --port 8766 \
+  --db /data/legal.db
+```
+
+The Admin Web UI creates `legal`, `business`, and `auditor` users, issues
+per-user API keys, and grants project access for users who need scoped project
+visibility.
+
 Keep deployment notes that contain hostnames, client paths, tokens, or real data
 in local documents outside Git.
