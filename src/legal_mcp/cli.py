@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -79,7 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"SQLite database path (default: {DEFAULT_DATABASE_PATH})",
     )
     admin_parser = subparsers.add_parser("admin", help="Admin bootstrap commands")
-    admin_subparsers = admin_parser.add_subparsers(dest="admin_command")
+    admin_subparsers = admin_parser.add_subparsers(dest="admin_command", required=True)
     create_user_parser = admin_subparsers.add_parser("create-user", help="Create a local user")
     create_user_parser.add_argument("--email", required=True)
     create_user_parser.add_argument("--display-name", required=True)
@@ -171,16 +172,24 @@ def main(argv: list[str] | None = None) -> int:
         from legal_mcp import db
         from legal_mcp.identity import create_user, hash_password
 
+        if args.role == "admin" and not args.password:
+            print("Error: --password is required when creating an admin user", file=sys.stderr)
+            return 2
+
         db.initialize_database(args.db)
         conn = db.connect(args.db)
         try:
-            create_user(
-                conn,
-                email=args.email,
-                display_name=args.display_name,
-                role=args.role,
-                password_hash=hash_password(args.password) if args.password else None,
-            )
+            try:
+                create_user(
+                    conn,
+                    email=args.email,
+                    display_name=args.display_name,
+                    role=args.role,
+                    password_hash=hash_password(args.password) if args.password else None,
+                )
+            except sqlite3.IntegrityError:
+                print(f"Error: user already exists: {args.email}", file=sys.stderr)
+                return 1
         finally:
             conn.close()
         print(f"Created user {args.email} ({args.role})")

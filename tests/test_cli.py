@@ -1,5 +1,8 @@
+import sqlite3
+
 from legal_mcp import __version__
 from legal_mcp.cli import main
+from legal_mcp.identity import verify_password
 
 
 def test_version_constant_exists() -> None:
@@ -66,6 +69,115 @@ def test_admin_create_user_parser() -> None:
     assert args.admin_command == "create-user"
     assert args.email == "admin@example.com"
     assert args.role == "admin"
+
+
+def test_admin_without_subcommand_fails(capsys) -> None:
+    parser = main.__globals__["build_parser"]()
+
+    try:
+        parser.parse_args(["admin"])
+    except SystemExit as exc:
+        assert exc.code == 2
+    else:
+        raise AssertionError("expected admin without subcommand to fail")
+
+    captured = capsys.readouterr()
+    assert "required" in captured.err
+
+
+def test_admin_create_user_requires_password_for_admin(tmp_path, capsys) -> None:
+    database_path = tmp_path / "legal.db"
+
+    assert (
+        main(
+            [
+                "admin",
+                "create-user",
+                "--email",
+                "admin@example.com",
+                "--display-name",
+                "Admin User",
+                "--role",
+                "admin",
+                "--db",
+                str(database_path),
+            ]
+        )
+        != 0
+    )
+
+    captured = capsys.readouterr()
+    assert "--password is required" in captured.err
+    assert not database_path.exists()
+
+
+def test_admin_create_user_duplicate_returns_clean_error(tmp_path, capsys) -> None:
+    database_path = tmp_path / "legal.db"
+    command = [
+        "admin",
+        "create-user",
+        "--email",
+        "admin@example.com",
+        "--display-name",
+        "Admin User",
+        "--role",
+        "admin",
+        "--password",
+        "secret",
+        "--db",
+        str(database_path),
+    ]
+
+    assert main(command) == 0
+    capsys.readouterr()
+
+    assert main(command) != 0
+    captured = capsys.readouterr()
+    assert "user already exists: admin@example.com" in captured.err
+    assert "IntegrityError" not in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_admin_create_user_writes_admin_password_hash(tmp_path, capsys) -> None:
+    database_path = tmp_path / "legal.db"
+
+    assert (
+        main(
+            [
+                "admin",
+                "create-user",
+                "--email",
+                "admin@example.com",
+                "--display-name",
+                "Admin User",
+                "--role",
+                "admin",
+                "--password",
+                "correct horse battery staple",
+                "--db",
+                str(database_path),
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert "Created user admin@example.com (admin)" in captured.out
+
+    conn = sqlite3.connect(database_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        user = conn.execute(
+            "select role, password_hash from users where email = ?",
+            ("admin@example.com",),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert user is not None
+    assert user["role"] == "admin"
+    assert user["password_hash"] is not None
+    assert verify_password("correct horse battery staple", user["password_hash"]) is True
 
 
 def test_serve_admin_parser() -> None:
