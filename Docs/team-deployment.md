@@ -160,6 +160,18 @@ legal-mcp proxy --url http://legal-mcp.internal:8765/mcp --token "$LEGAL_MCP_API
 For v1.1 shared-token pilots only, use `LEGAL_MCP_TOKEN` instead. In v1.2,
 using the shared token bypasses named-user attribution and project grants.
 
+## v1.3 Deployment Notes
+
+Before deploying v1.3, back up the SQLite database and run `legal-mcp doctor`.
+The server runs startup checks for the local schema version and fails clearly
+when the database is incompatible. Remote version checks can be configured for
+update notices, but network failures do not block MCP startup.
+
+v1.3 clients must use the tool catalog and fine-grained tools. Queries that
+previously depended on `get_project_context` need to request explicit fields or
+use the planner. This minimum disclosure model prevents default full project,
+license, contract, and risk context responses.
+
 ## Smoke test
 
 Ask the AI client:

@@ -55,6 +55,20 @@ Run the stdio MCP server directly:
 legal-mcp serve
 ```
 
+### v1.3 Minimum Disclosure
+
+Legal-MCP v1.3 is a breaking security upgrade. Full project-context queries are
+not allowed by default. Clients must use fine-grained tools, request explicit
+fields, or call the planner entry point so Legal-MCP can choose the minimum
+necessary fields.
+
+`get_project_context` is deprecated and no longer returns complete project,
+license, contract, and risk context. Use `tools/list` to inspect the tool
+catalog and select a fine-grained tool.
+
+Both stdio and HTTP transports run startup checks for schema compatibility.
+Remote update checks are optional and never block startup.
+
 ## MCP Client Configuration
 
 Run `legal-mcp setup --client CLIENT` to write a local stdio MCP server config.
