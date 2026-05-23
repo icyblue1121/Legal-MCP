@@ -15,7 +15,17 @@ from typing import Any
 
 from legal_mcp import db
 from legal_mcp.disclosure_audit import list_audit_events
-from legal_mcp.identity import ACTIVE, ROLE_ADMIN, hash_token, verify_password
+from legal_mcp.identity import (
+    ACTIVE,
+    ROLE_ADMIN,
+    ROLE_AUDITOR,
+    ROLE_BUSINESS,
+    ROLE_LEGAL,
+    create_api_key,
+    create_user,
+    hash_token,
+    verify_password,
+)
 
 _SESSION_COOKIE = "lmcp_admin"
 _SESSION_HOURS = 8
@@ -63,13 +73,38 @@ class LegalMCPAdminRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urllib.parse.urlparse(self.path).path
-        if path != "/login":
+        if path == "/login":
+            self._handle_login()
+            return
+
+        if not path.startswith("/admin/"):
             self._send_html(
                 HTTPStatus.NOT_FOUND,
                 self._page("Not Found", "<p>Not found</p>"),
             )
             return
 
+        admin = self._current_admin()
+        if admin is None:
+            self._redirect("/login")
+            return
+
+        if path == "/admin/users/create":
+            self._handle_create_user()
+            return
+        if path == "/admin/grants/create":
+            self._handle_create_grant(admin)
+            return
+        if path == "/admin/keys/create":
+            self._handle_create_key()
+            return
+
+        self._send_html(
+            HTTPStatus.NOT_FOUND,
+            self._page("Not Found", "<p>Not found</p>"),
+        )
+
+    def _handle_login(self) -> None:
         fields = self._read_form_fields()
         email = fields.get("email", "")
         password = fields.get("password", "")
@@ -114,6 +149,54 @@ class LegalMCPAdminRequestHandler(BaseHTTPRequestHandler):
             ],
         )
 
+    def _handle_create_user(self) -> None:
+        fields = self._read_form_fields()
+        conn = db.connect(self.server.database_path)
+        try:
+            create_user(
+                conn,
+                email=fields.get("email", ""),
+                display_name=fields.get("display_name", ""),
+                role=fields.get("role", ""),
+            )
+        finally:
+            conn.close()
+        self._redirect("/admin/users")
+
+    def _handle_create_grant(self, admin: sqlite3.Row) -> None:
+        fields = self._read_form_fields()
+        user_id = int(fields.get("user_id", "0"))
+        project_id = int(fields.get("project_id", "0"))
+        conn = db.connect(self.server.database_path)
+        try:
+            conn.execute(
+                """
+                insert or ignore into project_access
+                  (user_id, project_id, granted_by_user_id)
+                values (?, ?, ?)
+                """,
+                (user_id, project_id, admin["id"]),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        self._redirect("/admin/users")
+
+    def _handle_create_key(self) -> None:
+        fields = self._read_form_fields()
+        user_id = int(fields.get("user_id", "0"))
+        label = fields.get("label", "")
+        conn = db.connect(self.server.database_path)
+        try:
+            created_key = create_api_key(conn, user_id=user_id, label=label)
+        finally:
+            conn.close()
+        message = (
+            "Created API key "
+            f"{created_key.prefix}: {created_key.plaintext}"
+        )
+        self._send_users_page(message=message)
+
     def log_message(self, format: str, *args: Any) -> None:
         return
 
@@ -156,20 +239,75 @@ class LegalMCPAdminRequestHandler(BaseHTTPRequestHandler):
             return None
         return row
 
-    def _send_users_page(self) -> None:
+    def _send_users_page(self, message: str | None = None) -> None:
         conn = db.connect(self.server.database_path)
         try:
-            rows = conn.execute(
+            user_rows = conn.execute(
                 """
                 select id, email, display_name, role, status, created_at
                 from users
                 order by id
                 """
             ).fetchall()
+            project_rows = conn.execute(
+                """
+                select id, project_code, name
+                from projects
+                order by id
+                """
+            ).fetchall()
+            grant_rows = conn.execute(
+                """
+                select
+                  project_access.id,
+                  users.email,
+                  projects.project_code,
+                  projects.name,
+                  project_access.created_at
+                from project_access
+                join users on users.id = project_access.user_id
+                join projects on projects.id = project_access.project_id
+                order by project_access.id
+                """
+            ).fetchall()
+            key_rows = conn.execute(
+                """
+                select
+                  api_keys.id,
+                  users.email,
+                  api_keys.key_prefix,
+                  api_keys.label,
+                  api_keys.status,
+                  api_keys.created_at
+                from api_keys
+                join users on users.id = api_keys.user_id
+                order by api_keys.id
+                """
+            ).fetchall()
         finally:
             conn.close()
 
-        body_rows = "\n".join(
+        user_options = "\n".join(
+            f"<option value=\"{html.escape(str(row['id']))}\">"
+            f"{html.escape(str(row['id']))} - {html.escape(row['email'])}"
+            "</option>"
+            for row in user_rows
+        )
+        project_options = "\n".join(
+            f"<option value=\"{html.escape(str(row['id']))}\">"
+            f"{html.escape(str(row['id']))} - {html.escape(row['project_code'])}: {html.escape(row['name'])}"
+            "</option>"
+            for row in project_rows
+        )
+        role_options = "\n".join(
+            f"<option value=\"{html.escape(role)}\">{html.escape(role)}</option>"
+            for role in (ROLE_BUSINESS, ROLE_LEGAL, ROLE_AUDITOR, ROLE_ADMIN)
+        )
+        message_html = ""
+        if message is not None:
+            message_html = f"<p>{html.escape(message)}</p>"
+
+        user_body_rows = "\n".join(
             "<tr>"
             f"<td>{html.escape(str(row['id']))}</td>"
             f"<td>{html.escape(row['email'])}</td>"
@@ -178,14 +316,63 @@ class LegalMCPAdminRequestHandler(BaseHTTPRequestHandler):
             f"<td>{html.escape(row['status'])}</td>"
             f"<td>{html.escape(row['created_at'])}</td>"
             "</tr>"
-            for row in rows
+            for row in user_rows
+        )
+        grant_body_rows = "\n".join(
+            "<tr>"
+            f"<td>{html.escape(str(row['id']))}</td>"
+            f"<td>{html.escape(row['email'])}</td>"
+            f"<td>{html.escape(row['project_code'])}</td>"
+            f"<td>{html.escape(row['name'])}</td>"
+            f"<td>{html.escape(row['created_at'])}</td>"
+            "</tr>"
+            for row in grant_rows
+        )
+        key_body_rows = "\n".join(
+            "<tr>"
+            f"<td>{html.escape(str(row['id']))}</td>"
+            f"<td>{html.escape(row['email'])}</td>"
+            f"<td>{html.escape(row['key_prefix'])}</td>"
+            f"<td>{html.escape(row['label'])}</td>"
+            f"<td>{html.escape(row['status'])}</td>"
+            f"<td>{html.escape(row['created_at'])}</td>"
+            "</tr>"
+            for row in key_rows
         )
         body = f"""
         <nav><a href="/admin/users">Users</a> <a href="/admin/audit">Audit</a></nav>
         <h1>Users</h1>
+        {message_html}
+        <h2>Create User</h2>
+        <form method="post" action="/admin/users/create">
+          <label>Email <input type="email" name="email" required></label>
+          <label>Name <input type="text" name="display_name" required></label>
+          <label>Role <select name="role" required>{role_options}</select></label>
+          <button type="submit">Create User</button>
+        </form>
         <table>
           <thead><tr><th>ID</th><th>Email</th><th>Name</th><th>Role</th><th>Status</th><th>Created</th></tr></thead>
-          <tbody>{body_rows}</tbody>
+          <tbody>{user_body_rows}</tbody>
+        </table>
+        <h2>Grant Project Access</h2>
+        <form method="post" action="/admin/grants/create">
+          <label>User <select name="user_id" required>{user_options}</select></label>
+          <label>Project <select name="project_id" required>{project_options}</select></label>
+          <button type="submit">Grant Access</button>
+        </form>
+        <table>
+          <thead><tr><th>ID</th><th>User</th><th>Project Code</th><th>Project</th><th>Created</th></tr></thead>
+          <tbody>{grant_body_rows}</tbody>
+        </table>
+        <h2>Create API Key</h2>
+        <form method="post" action="/admin/keys/create">
+          <label>User <select name="user_id" required>{user_options}</select></label>
+          <label>Label <input type="text" name="label" required></label>
+          <button type="submit">Create Key</button>
+        </form>
+        <table>
+          <thead><tr><th>ID</th><th>User</th><th>Prefix</th><th>Label</th><th>Status</th><th>Created</th></tr></thead>
+          <tbody>{key_body_rows}</tbody>
         </table>
         """
         self._send_html(HTTPStatus.OK, self._page("Admin Users", body))

@@ -13,7 +13,13 @@ from typing import Iterator
 
 from legal_mcp import db
 from legal_mcp.admin_server import build_admin_server
-from legal_mcp.identity import ROLE_ADMIN, create_user, hash_password, hash_token
+from legal_mcp.identity import (
+    ROLE_ADMIN,
+    ROLE_BUSINESS,
+    create_user,
+    hash_password,
+    hash_token,
+)
 
 
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -93,6 +99,26 @@ def _insert_admin_session(
     finally:
         conn.close()
     return token
+
+
+def _logged_in_opener(base_url: str) -> urllib.request.OpenerDirector:
+    cookie_jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
+        urllib.request.HTTPCookieProcessor(cookie_jar),
+    )
+    login_body = urllib.parse.urlencode(
+        {"email": "admin@example.com", "password": "secret"}
+    ).encode("utf-8")
+    login_request = urllib.request.Request(
+        f"{base_url}/login",
+        data=login_body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    with opener.open(login_request, timeout=5) as response:
+        assert response.status == 200
+    return opener
 
 
 def test_admin_server_login_and_users_page_lists_admin(tmp_path: Path) -> None:
@@ -219,6 +245,149 @@ def test_bad_or_expired_session_redirects_to_login(tmp_path: Path) -> None:
                 assert response.headers["Location"] == "/login"
             else:
                 raise AssertionError("bad or expired session did not redirect")
+
+
+def test_unauthenticated_admin_post_redirects_to_login(tmp_path: Path) -> None:
+    database_path = tmp_path / "legal.db"
+    _database_with_admin_and_project(database_path)
+    with _running_admin_server(database_path) as base_url:
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}),
+            _NoRedirectHandler(),
+        )
+        request = urllib.request.Request(
+            f"{base_url}/admin/users/create",
+            data=b"",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+
+        try:
+            opener.open(request, timeout=5)
+        except HTTPError as response:
+            assert response.code == 303
+            assert response.headers["Location"] == "/login"
+        else:
+            raise AssertionError("unauthenticated admin POST did not redirect")
+
+
+def test_admin_can_create_business_user_and_grant_project(tmp_path: Path) -> None:
+    database_path = tmp_path / "legal.db"
+    _database_with_admin_and_project(database_path)
+    with _running_admin_server(database_path) as base_url:
+        opener = _logged_in_opener(base_url)
+        create_user_body = urllib.parse.urlencode(
+            {
+                "email": "business@example.com",
+                "display_name": "Business User",
+                "role": ROLE_BUSINESS,
+            }
+        ).encode("utf-8")
+        create_user_request = urllib.request.Request(
+            f"{base_url}/admin/users/create",
+            data=create_user_body,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+
+        with opener.open(create_user_request, timeout=5) as response:
+            assert response.status == 200
+
+        with opener.open(f"{base_url}/admin/users", timeout=5) as response:
+            body = response.read().decode("utf-8")
+
+        assert "business@example.com" in body
+
+        conn = db.connect(database_path)
+        try:
+            user = conn.execute(
+                "select id from users where email = ?",
+                ("business@example.com",),
+            ).fetchone()
+            project = conn.execute(
+                "select id from projects where project_code = ?",
+                ("ADMIN",),
+            ).fetchone()
+            assert user is not None
+            assert project is not None
+            user_id = user["id"]
+            project_id = project["id"]
+        finally:
+            conn.close()
+
+        create_grant_body = urllib.parse.urlencode(
+            {"user_id": str(user_id), "project_id": str(project_id)}
+        ).encode("utf-8")
+        create_grant_request = urllib.request.Request(
+            f"{base_url}/admin/grants/create",
+            data=create_grant_body,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+
+        with opener.open(create_grant_request, timeout=5) as response:
+            assert response.status == 200
+
+        conn = db.connect(database_path)
+        try:
+            grant = conn.execute(
+                """
+                select * from project_access
+                where user_id = ? and project_id = ?
+                """,
+                (user_id, project_id),
+            ).fetchone()
+        finally:
+            conn.close()
+
+        assert grant is not None
+
+
+def test_admin_can_create_api_key_and_see_plaintext_once(tmp_path: Path) -> None:
+    database_path = tmp_path / "legal.db"
+    _database_with_admin_and_project(database_path)
+    with _running_admin_server(database_path) as base_url:
+        opener = _logged_in_opener(base_url)
+        conn = db.connect(database_path)
+        try:
+            user = conn.execute(
+                "select id from users where email = ?",
+                ("admin@example.com",),
+            ).fetchone()
+            assert user is not None
+            user_id = user["id"]
+        finally:
+            conn.close()
+
+        create_key_body = urllib.parse.urlencode(
+            {"user_id": str(user_id), "label": "pytest"}
+        ).encode("utf-8")
+        create_key_request = urllib.request.Request(
+            f"{base_url}/admin/keys/create",
+            data=create_key_body,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+
+        with opener.open(create_key_request, timeout=5) as response:
+            body = response.read().decode("utf-8")
+
+        assert response.status == 200
+        assert "lmcp_" in body
+
+        conn = db.connect(database_path)
+        try:
+            key = conn.execute(
+                "select key_prefix, key_hash, label from api_keys where user_id = ?",
+                (user_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+
+        assert key is not None
+        assert key["label"] == "pytest"
+        assert key["key_prefix"] in body
+        assert key["key_hash"] not in body
 
 
 def test_audit_page_shows_only_recent_events(tmp_path: Path) -> None:
