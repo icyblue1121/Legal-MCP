@@ -204,6 +204,151 @@ def test_hidden_ambiguous_lookup_records_denied_disclosures_without_candidates(
     assert {disclosure["decision"] for disclosure in disclosures} == {"denied"}
 
 
+def test_visible_ambiguous_lookup_records_allowed_candidate_disclosures(
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        first_project_id = conn.execute(
+            "insert into projects (project_code, name, stage) values (?, ?, ?)",
+            ("GAME-001", "Shared Name", "live"),
+        ).lastrowid
+        second_project_id = conn.execute(
+            "insert into projects (project_code, name, stage) values (?, ?, ?)",
+            ("GAME-002", "Shared Name", "live"),
+        ).lastrowid
+        business_user = create_user(
+            conn,
+            email="business@example.com",
+            display_name="Business User",
+            role=ROLE_BUSINESS,
+        )
+        legal_user = create_user(
+            conn,
+            email="legal@example.com",
+            display_name="Legal User",
+            role=ROLE_LEGAL,
+        )
+        conn.executemany(
+            """
+            insert into project_access (user_id, project_id, granted_by_user_id)
+            values (?, ?, ?)
+            """,
+            [
+                (business_user["id"], first_project_id, legal_user["id"]),
+                (business_user["id"], second_project_id, legal_user["id"]),
+            ],
+        )
+        conn.commit()
+        context = AccessContext.from_user(business_user)
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "get_project_context",
+        {"project_id_or_name": "Shared Name", "rationale": "prepare business summary"},
+        database_path=database_path,
+        access_context=context,
+    )
+
+    conn = db.connect(database_path)
+    try:
+        disclosures = conn.execute(
+            """
+            select project_id, record_type, record_id, decision, reason
+            from audit_disclosures
+            order by project_id
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+
+    assert result["error"]["code"] == "ambiguous_project"
+    assert [candidate["project_code"] for candidate in result["error"]["candidates"]] == [
+        "GAME-001",
+        "GAME-002",
+    ]
+    assert [disclosure["project_id"] for disclosure in disclosures] == [
+        first_project_id,
+        second_project_id,
+    ]
+    assert [disclosure["record_id"] for disclosure in disclosures] == [
+        first_project_id,
+        second_project_id,
+    ]
+    assert {disclosure["record_type"] for disclosure in disclosures} == {"project"}
+    assert {disclosure["decision"] for disclosure in disclosures} == {"allowed"}
+    assert {disclosure["reason"] for disclosure in disclosures} == {"project_visible"}
+
+
+def test_open_risks_hidden_project_code_records_denied_disclosure_without_leak(
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        visible_project_id = conn.execute(
+            "insert into projects (project_code, name, stage) values (?, ?, ?)",
+            ("GAME-001", "Visible Project", "live"),
+        ).lastrowid
+        hidden_project_id = conn.execute(
+            "insert into projects (project_code, name, stage) values (?, ?, ?)",
+            ("GAME-002", "Hidden Project", "live"),
+        ).lastrowid
+        conn.execute(
+            "insert into risks (project_id, external_key, description, status) values (?, ?, ?, ?)",
+            (hidden_project_id, "hidden-risk", "Hidden risk", "open"),
+        )
+        business_user = create_user(
+            conn,
+            email="business@example.com",
+            display_name="Business User",
+            role=ROLE_BUSINESS,
+        )
+        legal_user = create_user(
+            conn,
+            email="legal@example.com",
+            display_name="Legal User",
+            role=ROLE_LEGAL,
+        )
+        conn.execute(
+            """
+            insert into project_access (user_id, project_id, granted_by_user_id)
+            values (?, ?, ?)
+            """,
+            (business_user["id"], visible_project_id, legal_user["id"]),
+        )
+        conn.commit()
+        context = AccessContext.from_user(business_user)
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "list_open_risks",
+        {"project_code": "GAME-002", "rationale": "prepare business summary"},
+        database_path=database_path,
+        access_context=context,
+    )
+
+    conn = db.connect(database_path)
+    try:
+        disclosure = conn.execute(
+            "select project_id, record_type, record_id, decision, reason from audit_disclosures"
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert result == {"risks": []}
+    assert disclosure["project_id"] == hidden_project_id
+    assert disclosure["record_type"] == "project"
+    assert disclosure["record_id"] == hidden_project_id
+    assert disclosure["decision"] == "denied"
+    assert disclosure["reason"] == "project_hidden"
+
+
 def test_auditor_denial_records_database_audit_event_without_disclosure(tmp_path) -> None:
     database_path = tmp_path / "legal.db"
     db.initialize_database(database_path)

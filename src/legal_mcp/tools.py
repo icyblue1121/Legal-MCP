@@ -126,7 +126,7 @@ def call_tool(
             elif tool_name == "list_expiring_licenses":
                 result = _list_expiring_licenses(conn, arguments, access_context)
             elif tool_name == "list_open_risks":
-                result = _list_open_risks(conn, arguments, access_context)
+                result = _list_open_risks(conn, arguments, access_context, disclosures)
             else:
                 result = _error("validation_error", f"unknown tool: {tool_name}")
         finally:
@@ -311,9 +311,27 @@ def _list_open_risks(
     conn: sqlite3.Connection,
     arguments: dict[str, Any],
     access_context: AccessContext | None,
+    disclosures: list[Disclosure],
 ) -> dict[str, Any]:
     project_code = arguments.get("project_code")
     visible = visible_project_ids(conn, access_context)
+    if isinstance(project_code, str) and project_code.strip() and visible is not None:
+        project = conn.execute(
+            "select id from projects where project_code = ?",
+            (project_code,),
+        ).fetchone()
+        if project is not None and int(project["id"]) not in visible:
+            disclosures.append(
+                Disclosure(
+                    project_id=int(project["id"]),
+                    record_type="project",
+                    record_id=int(project["id"]),
+                    decision="denied",
+                    reason="project_hidden",
+                )
+            )
+            return {"risks": []}
+
     if visible == set():
         return {"risks": []}
 
@@ -407,8 +425,18 @@ def _audit_database(
 
 
 def _disclosures_from_result(result: dict[str, Any]) -> list[Disclosure]:
-    if result.get("error"):
-        return []
+    error = result.get("error")
+    if error:
+        if not isinstance(error, dict) or error.get("code") != "ambiguous_project":
+            return []
+
+        disclosures: list[Disclosure] = []
+        for candidate in error.get("candidates", []):
+            if isinstance(candidate, dict):
+                disclosure = _disclosure_from_record(candidate, "project", candidate)
+                if disclosure is not None:
+                    disclosures.append(disclosure)
+        return disclosures
 
     disclosures: list[Disclosure] = []
     project = result.get("project")
