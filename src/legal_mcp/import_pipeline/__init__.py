@@ -6,9 +6,14 @@ from pathlib import Path
 
 from legal_mcp import db
 from legal_mcp.db import DatabasePath
+from legal_mcp.import_pipeline.contract_adapter import (
+    adapt_contract_information_rows,
+    is_contract_information,
+)
 from legal_mcp.import_pipeline.csv_reader import read_csv
 from legal_mcp.import_pipeline.ledger_adapter import adapt_ledger_rows, is_ledger
 from legal_mcp.import_pipeline.normalize import normalize_rows, normalized_entity_for_path
+from legal_mcp.import_pipeline.project_matcher import match_project
 from legal_mcp.import_pipeline.report import ImportReport
 from legal_mcp.import_pipeline.upsert import upsert_records
 from legal_mcp.import_pipeline.validate import validate_records
@@ -25,7 +30,10 @@ def import_file(path: str | Path, *, database_path: DatabasePath) -> ImportRepor
     db.initialize_database(database_path)
     conn = db.connect(database_path)
     try:
-        if is_ledger(headers):
+        if is_contract_information(headers):
+            records = adapt_contract_information_rows(source_path, source_rows, report)
+            records = _resolve_contract_projects(conn, records)
+        elif is_ledger(headers):
             records = adapt_ledger_rows(source_path, headers, source_rows, report)
         else:
             entity = normalized_entity_for_path(source_path)
@@ -50,6 +58,18 @@ def import_file(path: str | Path, *, database_path: DatabasePath) -> ImportRepor
         conn.close()
 
     return report
+
+
+def _resolve_contract_projects(conn, records):
+    resolved = []
+    for record in records:
+        match = match_project(conn, record.values.get("project_code"))
+        if match.project_code is None:
+            resolved.append(record)
+            continue
+        values = {**record.values, "project_code": match.project_code}
+        resolved.append(type(record)(record.entity, record.row_number, values))
+    return resolved
 
 
 def _read_source(source_path: Path):

@@ -25,8 +25,16 @@ EXPECTED_COLUMNS = {
         "project_id",
         "external_key",
         "title",
+        "handler",
+        "payment_terms",
+        "currency",
+        "total_amount",
+        "expiry_date",
         "counterparty",
+        "company_entity",
         "signed_date",
+        "contract_number",
+        "income_expense_type",
         "summary",
         "created_at",
         "updated_at",
@@ -189,6 +197,30 @@ def test_initialize_database_creates_group_permission_and_alias_tables(tmp_path)
     assert "user_group_memberships" in tables
     assert "permission_grants" in tables
     assert "project_aliases" in tables
+
+
+def test_contracts_table_has_contract_information_columns(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        columns = {
+            row["name"]
+            for row in conn.execute("pragma table_info(contracts)")
+        }
+    finally:
+        conn.close()
+
+    assert {
+        "handler",
+        "payment_terms",
+        "currency",
+        "total_amount",
+        "expiry_date",
+        "company_entity",
+        "contract_number",
+        "income_expense_type",
+    }.issubset(columns)
 
 
 def test_initialize_database_creates_required_tables_and_columns(tmp_path) -> None:

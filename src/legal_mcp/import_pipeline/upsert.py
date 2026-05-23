@@ -22,8 +22,16 @@ ENTITY_COLUMNS = {
     "contracts": (
         "external_key",
         "title",
+        "handler",
+        "payment_terms",
+        "currency",
+        "total_amount",
+        "expiry_date",
         "counterparty",
+        "company_entity",
         "signed_date",
+        "contract_number",
+        "income_expense_type",
         "summary",
     ),
     "licenses": (
