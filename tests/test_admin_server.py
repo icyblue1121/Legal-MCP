@@ -7,9 +7,9 @@ import urllib.request
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from http.client import HTTPResponse
-from urllib.error import HTTPError
 from pathlib import Path
 from typing import Iterator
+from urllib.error import HTTPError
 
 from legal_mcp import db
 from legal_mcp.admin_server import build_admin_server
@@ -119,6 +119,30 @@ def _logged_in_opener(base_url: str) -> urllib.request.OpenerDirector:
     with opener.open(login_request, timeout=5) as response:
         assert response.status == 200
     return opener
+
+
+def _post_form_expect_error(
+    opener: urllib.request.OpenerDirector,
+    url: str,
+    fields: dict[str, str],
+    expected_status: int,
+    expected_message: str,
+) -> None:
+    request = urllib.request.Request(
+        url,
+        data=urllib.parse.urlencode(fields).encode("utf-8"),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+
+    try:
+        opener.open(request, timeout=5)
+    except HTTPError as response:
+        body = response.read().decode("utf-8")
+        assert response.code == expected_status
+        assert expected_message in body
+    else:
+        raise AssertionError("form request did not return an error")
 
 
 def test_admin_server_login_and_users_page_lists_admin(tmp_path: Path) -> None:
@@ -343,6 +367,79 @@ def test_admin_can_create_business_user_and_grant_project(tmp_path: Path) -> Non
         assert grant is not None
 
 
+def test_admin_create_user_form_returns_clear_validation_errors(tmp_path: Path) -> None:
+    database_path = tmp_path / "legal.db"
+    _database_with_admin_and_project(database_path)
+    with _running_admin_server(database_path) as base_url:
+        opener = _logged_in_opener(base_url)
+
+        _post_form_expect_error(
+            opener,
+            f"{base_url}/admin/users/create",
+            {"email": "", "display_name": "Missing Email", "role": ROLE_BUSINESS},
+            400,
+            "Email is required.",
+        )
+        _post_form_expect_error(
+            opener,
+            f"{base_url}/admin/users/create",
+            {
+                "email": "invalid-role@example.com",
+                "display_name": "Invalid Role",
+                "role": "owner",
+            },
+            400,
+            "Invalid role.",
+        )
+        _post_form_expect_error(
+            opener,
+            f"{base_url}/admin/users/create",
+            {
+                "email": "admin@example.com",
+                "display_name": "Duplicate User",
+                "role": ROLE_BUSINESS,
+            },
+            409,
+            "A user with that email already exists.",
+        )
+
+
+def test_admin_grant_form_returns_clear_validation_errors(tmp_path: Path) -> None:
+    database_path = tmp_path / "legal.db"
+    _database_with_admin_and_project(database_path)
+    with _running_admin_server(database_path) as base_url:
+        opener = _logged_in_opener(base_url)
+
+        _post_form_expect_error(
+            opener,
+            f"{base_url}/admin/grants/create",
+            {"user_id": "", "project_id": "1"},
+            400,
+            "User is required.",
+        )
+        _post_form_expect_error(
+            opener,
+            f"{base_url}/admin/grants/create",
+            {"user_id": "abc", "project_id": "1"},
+            400,
+            "User must be a valid ID.",
+        )
+        _post_form_expect_error(
+            opener,
+            f"{base_url}/admin/grants/create",
+            {"user_id": "1", "project_id": "abc"},
+            400,
+            "Project must be a valid ID.",
+        )
+        _post_form_expect_error(
+            opener,
+            f"{base_url}/admin/grants/create",
+            {"user_id": "999", "project_id": "1"},
+            400,
+            "User or project does not exist.",
+        )
+
+
 def test_admin_can_create_api_key_and_see_plaintext_once(tmp_path: Path) -> None:
     database_path = tmp_path / "legal.db"
     _database_with_admin_and_project(database_path)
@@ -374,6 +471,8 @@ def test_admin_can_create_api_key_and_see_plaintext_once(tmp_path: Path) -> None
 
         assert response.status == 200
         assert "lmcp_" in body
+        plaintext_token = "lmcp_" + body.split("lmcp_", 1)[1].split("<", 1)[0]
+        assert plaintext_token in body
 
         conn = db.connect(database_path)
         try:
@@ -388,6 +487,50 @@ def test_admin_can_create_api_key_and_see_plaintext_once(tmp_path: Path) -> None
         assert key["label"] == "pytest"
         assert key["key_prefix"] in body
         assert key["key_hash"] not in body
+        assert plaintext_token not in key["key_hash"]
+        assert plaintext_token not in key["key_prefix"]
+        assert plaintext_token not in key["label"]
+
+        with opener.open(f"{base_url}/admin/users", timeout=5) as response:
+            users_body = response.read().decode("utf-8")
+
+        assert plaintext_token not in users_body
+
+
+def test_admin_create_api_key_form_returns_clear_validation_errors(tmp_path: Path) -> None:
+    database_path = tmp_path / "legal.db"
+    _database_with_admin_and_project(database_path)
+    with _running_admin_server(database_path) as base_url:
+        opener = _logged_in_opener(base_url)
+
+        _post_form_expect_error(
+            opener,
+            f"{base_url}/admin/keys/create",
+            {"user_id": "", "label": "pytest"},
+            400,
+            "User is required.",
+        )
+        _post_form_expect_error(
+            opener,
+            f"{base_url}/admin/keys/create",
+            {"user_id": "abc", "label": "pytest"},
+            400,
+            "User must be a valid ID.",
+        )
+        _post_form_expect_error(
+            opener,
+            f"{base_url}/admin/keys/create",
+            {"user_id": "999", "label": "pytest"},
+            400,
+            "User does not exist.",
+        )
+        _post_form_expect_error(
+            opener,
+            f"{base_url}/admin/keys/create",
+            {"user_id": "1", "label": ""},
+            400,
+            "Label is required.",
+        )
 
 
 def test_audit_page_shows_only_recent_events(tmp_path: Path) -> None:

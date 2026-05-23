@@ -30,6 +30,7 @@ from legal_mcp.identity import (
 _SESSION_COOKIE = "lmcp_admin"
 _SESSION_HOURS = 8
 _AUDIT_EVENT_LIMIT = 100
+_ALLOWED_ROLES = {ROLE_ADMIN, ROLE_AUDITOR, ROLE_BUSINESS, ROLE_LEGAL}
 
 
 class LegalMCPAdminServer(ThreadingHTTPServer):
@@ -151,44 +152,89 @@ class LegalMCPAdminRequestHandler(BaseHTTPRequestHandler):
 
     def _handle_create_user(self) -> None:
         fields = self._read_form_fields()
+        email = fields.get("email", "").strip()
+        display_name = fields.get("display_name", "").strip()
+        role = fields.get("role", "").strip()
+        if not email:
+            self._send_form_error(HTTPStatus.BAD_REQUEST, "Email is required.")
+            return
+        if not display_name:
+            self._send_form_error(HTTPStatus.BAD_REQUEST, "Name is required.")
+            return
+        if not role:
+            self._send_form_error(HTTPStatus.BAD_REQUEST, "Role is required.")
+            return
+        if role not in _ALLOWED_ROLES:
+            self._send_form_error(HTTPStatus.BAD_REQUEST, "Invalid role.")
+            return
+
         conn = db.connect(self.server.database_path)
         try:
-            create_user(
-                conn,
-                email=fields.get("email", ""),
-                display_name=fields.get("display_name", ""),
-                role=fields.get("role", ""),
-            )
+            try:
+                create_user(conn, email=email, display_name=display_name, role=role)
+            except sqlite3.IntegrityError as exc:
+                if "users.email" in str(exc):
+                    self._send_form_error(
+                        HTTPStatus.CONFLICT,
+                        "A user with that email already exists.",
+                    )
+                    return
+                self._send_form_error(HTTPStatus.BAD_REQUEST, "Could not create user.")
+                return
         finally:
             conn.close()
         self._redirect("/admin/users")
 
     def _handle_create_grant(self, admin: sqlite3.Row) -> None:
         fields = self._read_form_fields()
-        user_id = int(fields.get("user_id", "0"))
-        project_id = int(fields.get("project_id", "0"))
+        try:
+            user_id = self._parse_required_int(fields, "user_id", "User")
+            project_id = self._parse_required_int(fields, "project_id", "Project")
+        except ValueError as exc:
+            self._send_form_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+
         conn = db.connect(self.server.database_path)
         try:
-            conn.execute(
-                """
-                insert or ignore into project_access
-                  (user_id, project_id, granted_by_user_id)
-                values (?, ?, ?)
-                """,
-                (user_id, project_id, admin["id"]),
-            )
-            conn.commit()
+            try:
+                conn.execute(
+                    """
+                    insert or ignore into project_access
+                      (user_id, project_id, granted_by_user_id)
+                    values (?, ?, ?)
+                    """,
+                    (user_id, project_id, admin["id"]),
+                )
+                conn.commit()
+            except sqlite3.IntegrityError:
+                self._send_form_error(
+                    HTTPStatus.BAD_REQUEST,
+                    "User or project does not exist.",
+                )
+                return
         finally:
             conn.close()
         self._redirect("/admin/users")
 
     def _handle_create_key(self) -> None:
         fields = self._read_form_fields()
-        user_id = int(fields.get("user_id", "0"))
-        label = fields.get("label", "")
+        try:
+            user_id = self._parse_required_int(fields, "user_id", "User")
+        except ValueError as exc:
+            self._send_form_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+        label = fields.get("label", "").strip()
+        if not label:
+            self._send_form_error(HTTPStatus.BAD_REQUEST, "Label is required.")
+            return
+
         conn = db.connect(self.server.database_path)
         try:
-            created_key = create_api_key(conn, user_id=user_id, label=label)
+            try:
+                created_key = create_api_key(conn, user_id=user_id, label=label)
+            except sqlite3.IntegrityError:
+                self._send_form_error(HTTPStatus.BAD_REQUEST, "User does not exist.")
+                return
         finally:
             conn.close()
         message = (
@@ -436,6 +482,20 @@ class LegalMCPAdminRequestHandler(BaseHTTPRequestHandler):
         parsed = urllib.parse.parse_qs(body, keep_blank_values=True)
         return {key: values[0] for key, values in parsed.items() if values}
 
+    def _parse_required_int(
+        self,
+        fields: dict[str, str],
+        name: str,
+        label: str,
+    ) -> int:
+        value = fields.get(name, "").strip()
+        if not value:
+            raise ValueError(f"{label} is required.")
+        try:
+            return int(value)
+        except ValueError:
+            raise ValueError(f"{label} must be a valid ID.") from None
+
     def _redirect(
         self,
         location: str,
@@ -455,6 +515,14 @@ class LegalMCPAdminRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
+
+    def _send_form_error(self, status: HTTPStatus, message: str) -> None:
+        body = f"""
+        <nav><a href="/admin/users">Users</a></nav>
+        <h1>Form Error</h1>
+        <p>{html.escape(message)}</p>
+        """
+        self._send_html(status, self._page("Form Error", body))
 
     def _page(self, title: str, body: str) -> str:
         escaped_title = html.escape(title)
