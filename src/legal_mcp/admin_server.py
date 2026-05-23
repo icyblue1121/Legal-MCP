@@ -99,6 +99,18 @@ class LegalMCPAdminRequestHandler(BaseHTTPRequestHandler):
         if path == "/admin/keys/create":
             self._handle_create_key()
             return
+        if path == "/admin/groups/create":
+            self._handle_create_group()
+            return
+        if path == "/admin/group-memberships/create":
+            self._handle_create_group_membership()
+            return
+        if path == "/admin/permissions/create":
+            self._handle_create_permission()
+            return
+        if path == "/admin/project-aliases/create":
+            self._handle_create_project_alias()
+            return
 
         self._send_html(
             HTTPStatus.NOT_FOUND,
@@ -243,6 +255,106 @@ class LegalMCPAdminRequestHandler(BaseHTTPRequestHandler):
         )
         self._send_users_page(message=message)
 
+    def _handle_create_group(self) -> None:
+        fields = self._read_form_fields()
+        name = fields.get("name", "").strip()
+        description = fields.get("description", "").strip() or None
+        if not name:
+            self._send_form_error(HTTPStatus.BAD_REQUEST, "Group name is required.")
+            return
+        conn = db.connect(self.server.database_path)
+        try:
+            try:
+                conn.execute(
+                    "insert into user_groups (name, description) values (?, ?)",
+                    (name, description),
+                )
+                conn.commit()
+            except sqlite3.IntegrityError:
+                self._send_form_error(HTTPStatus.CONFLICT, "Group already exists.")
+                return
+        finally:
+            conn.close()
+        self._redirect("/admin/users")
+
+    def _handle_create_group_membership(self) -> None:
+        fields = self._read_form_fields()
+        try:
+            user_id = self._parse_required_int(fields, "user_id", "User")
+            group_id = self._parse_required_int(fields, "group_id", "Group")
+        except ValueError as exc:
+            self._send_form_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+        conn = db.connect(self.server.database_path)
+        try:
+            conn.execute(
+                "insert or ignore into user_group_memberships (user_id, group_id) values (?, ?)",
+                (user_id, group_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        self._redirect("/admin/users")
+
+    def _handle_create_permission(self) -> None:
+        fields = self._read_form_fields()
+        try:
+            group_id = self._parse_required_int(fields, "group_id", "Group")
+        except ValueError as exc:
+            self._send_form_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+        operation = fields.get("operation", "").strip()
+        data_domain = fields.get("data_domain", "").strip()
+        field_name = fields.get("field_name", "").strip() or None
+        project_id_value = fields.get("project_id", "").strip()
+        project_id = int(project_id_value) if project_id_value else None
+        if not operation or not data_domain:
+            self._send_form_error(
+                HTTPStatus.BAD_REQUEST,
+                "Operation and data domain are required.",
+            )
+            return
+        conn = db.connect(self.server.database_path)
+        try:
+            conn.execute(
+                """
+                insert or ignore into permission_grants
+                  (group_id, operation, data_domain, field_name, project_id)
+                values (?, ?, ?, ?, ?)
+                """,
+                (group_id, operation, data_domain, field_name, project_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        self._redirect("/admin/users")
+
+    def _handle_create_project_alias(self) -> None:
+        fields = self._read_form_fields()
+        try:
+            project_id = self._parse_required_int(fields, "project_id", "Project")
+        except ValueError as exc:
+            self._send_form_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+        alias = fields.get("alias", "").strip()
+        if not alias:
+            self._send_form_error(HTTPStatus.BAD_REQUEST, "Alias is required.")
+            return
+        conn = db.connect(self.server.database_path)
+        try:
+            try:
+                conn.execute(
+                    "insert into project_aliases (project_id, alias, source) values (?, ?, ?)",
+                    (project_id, alias, "admin"),
+                )
+                conn.commit()
+            except sqlite3.IntegrityError:
+                self._send_form_error(HTTPStatus.CONFLICT, "Alias already exists.")
+                return
+        finally:
+            conn.close()
+        self._redirect("/admin/users")
+
     def log_message(self, format: str, *args: Any) -> None:
         return
 
@@ -330,6 +442,32 @@ class LegalMCPAdminRequestHandler(BaseHTTPRequestHandler):
                 order by api_keys.id
                 """
             ).fetchall()
+            group_rows = conn.execute(
+                "select id, name, description from user_groups order by id"
+            ).fetchall()
+            permission_rows = conn.execute(
+                """
+                select
+                  permission_grants.id,
+                  user_groups.name as group_name,
+                  permission_grants.operation,
+                  permission_grants.data_domain,
+                  permission_grants.field_name,
+                  projects.project_code
+                from permission_grants
+                join user_groups on user_groups.id = permission_grants.group_id
+                left join projects on projects.id = permission_grants.project_id
+                order by permission_grants.id
+                """
+            ).fetchall()
+            alias_rows = conn.execute(
+                """
+                select project_aliases.id, projects.project_code, project_aliases.alias
+                from project_aliases
+                join projects on projects.id = project_aliases.project_id
+                order by project_aliases.id
+                """
+            ).fetchall()
         finally:
             conn.close()
 
@@ -348,6 +486,27 @@ class LegalMCPAdminRequestHandler(BaseHTTPRequestHandler):
         role_options = "\n".join(
             f"<option value=\"{html.escape(role)}\">{html.escape(role)}</option>"
             for role in (ROLE_BUSINESS, ROLE_LEGAL, ROLE_AUDITOR, ROLE_ADMIN)
+        )
+        group_options = "\n".join(
+            f"<option value=\"{html.escape(str(row['id']))}\">"
+            f"{html.escape(str(row['id']))} - {html.escape(row['name'])}"
+            "</option>"
+            for row in group_rows
+        )
+        operation_options = "\n".join(
+            f"<option value=\"{html.escape(value)}\">{html.escape(value)}</option>"
+            for value in (
+                "read",
+                "import",
+                "manage_users",
+                "manage_keys",
+                "manage_permissions",
+                "view_audit",
+            )
+        )
+        domain_options = "\n".join(
+            f"<option value=\"{html.escape(value)}\">{html.escape(value)}</option>"
+            for value in ("project", "contract", "party", "license", "asset", "risk", "audit", "admin")
         )
         message_html = ""
         if message is not None:
@@ -385,6 +544,33 @@ class LegalMCPAdminRequestHandler(BaseHTTPRequestHandler):
             "</tr>"
             for row in key_rows
         )
+        group_body_rows = "\n".join(
+            "<tr>"
+            f"<td>{html.escape(str(row['id']))}</td>"
+            f"<td>{html.escape(row['name'])}</td>"
+            f"<td>{html.escape(row['description'] or '')}</td>"
+            "</tr>"
+            for row in group_rows
+        )
+        permission_body_rows = "\n".join(
+            "<tr>"
+            f"<td>{html.escape(str(row['id']))}</td>"
+            f"<td>{html.escape(row['group_name'])}</td>"
+            f"<td>{html.escape(row['operation'])}</td>"
+            f"<td>{html.escape(row['data_domain'])}</td>"
+            f"<td>{html.escape(row['field_name'] or '')}</td>"
+            f"<td>{html.escape(row['project_code'] or 'All projects')}</td>"
+            "</tr>"
+            for row in permission_rows
+        )
+        alias_body_rows = "\n".join(
+            "<tr>"
+            f"<td>{html.escape(str(row['id']))}</td>"
+            f"<td>{html.escape(row['project_code'])}</td>"
+            f"<td>{html.escape(row['alias'])}</td>"
+            "</tr>"
+            for row in alias_rows
+        )
         body = f"""
         <nav><a href="/admin/users">Users</a> <a href="/admin/audit">Audit</a></nav>
         <h1>Users</h1>
@@ -419,6 +605,45 @@ class LegalMCPAdminRequestHandler(BaseHTTPRequestHandler):
         <table>
           <thead><tr><th>ID</th><th>User</th><th>Prefix</th><th>Label</th><th>Status</th><th>Created</th></tr></thead>
           <tbody>{key_body_rows}</tbody>
+        </table>
+        <h2>Create Group</h2>
+        <form method="post" action="/admin/groups/create">
+          <label>Name <input type="text" name="name" required></label>
+          <label>Description <input type="text" name="description"></label>
+          <button type="submit">Create Group</button>
+        </form>
+        <table>
+          <thead><tr><th>ID</th><th>Name</th><th>Description</th></tr></thead>
+          <tbody>{group_body_rows}</tbody>
+        </table>
+        <h2>Add User To Group</h2>
+        <form method="post" action="/admin/group-memberships/create">
+          <label>User <select name="user_id" required>{user_options}</select></label>
+          <label>Group <select name="group_id" required>{group_options}</select></label>
+          <button type="submit">Add Member</button>
+        </form>
+        <h2>Grant Permission</h2>
+        <form method="post" action="/admin/permissions/create">
+          <label>Group <select name="group_id" required>{group_options}</select></label>
+          <label>Operation <select name="operation" required>{operation_options}</select></label>
+          <label>Domain <select name="data_domain" required>{domain_options}</select></label>
+          <label>Field <input type="text" name="field_name"></label>
+          <label>Project <select name="project_id"><option value="">All projects</option>{project_options}</select></label>
+          <button type="submit">Grant Permission</button>
+        </form>
+        <table>
+          <thead><tr><th>ID</th><th>Group</th><th>Operation</th><th>Domain</th><th>Field</th><th>Project</th></tr></thead>
+          <tbody>{permission_body_rows}</tbody>
+        </table>
+        <h2>Create Project Alias</h2>
+        <form method="post" action="/admin/project-aliases/create">
+          <label>Project <select name="project_id" required>{project_options}</select></label>
+          <label>Alias <input type="text" name="alias" required></label>
+          <button type="submit">Create Alias</button>
+        </form>
+        <table>
+          <thead><tr><th>ID</th><th>Project</th><th>Alias</th></tr></thead>
+          <tbody>{alias_body_rows}</tbody>
         </table>
         """
         self._send_html(HTTPStatus.OK, self._page("Admin Users", body))

@@ -174,6 +174,24 @@ def test_admin_server_login_and_users_page_lists_admin(tmp_path: Path) -> None:
         assert "admin@example.com" in body
 
 
+def test_admin_users_page_includes_group_permission_and_alias_forms(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "legal.db"
+    _database_with_admin_and_project(database_path)
+
+    with _running_admin_server(database_path) as base_url:
+        opener = _logged_in_opener(base_url)
+        with opener.open(f"{base_url}/admin/users", timeout=5) as response:
+            body = response.read().decode("utf-8")
+
+    assert response.status == 200
+    assert "/admin/groups/create" in body
+    assert "/admin/group-memberships/create" in body
+    assert "/admin/permissions/create" in body
+    assert "/admin/project-aliases/create" in body
+
+
 def test_login_sets_admin_cookie_and_redirects_to_users(tmp_path: Path) -> None:
     database_path = tmp_path / "legal.db"
     _database_with_admin_and_project(database_path)
@@ -365,6 +383,110 @@ def test_admin_can_create_business_user_and_grant_project(tmp_path: Path) -> Non
             conn.close()
 
         assert grant is not None
+
+
+def test_admin_can_create_group_permission_and_project_alias(tmp_path: Path) -> None:
+    database_path = tmp_path / "legal.db"
+    _database_with_admin_and_project(database_path)
+    with _running_admin_server(database_path) as base_url:
+        opener = _logged_in_opener(base_url)
+        conn = db.connect(database_path)
+        try:
+            user = conn.execute(
+                "select id from users where email = ?",
+                ("admin@example.com",),
+            ).fetchone()
+            project = conn.execute(
+                "select id from projects where project_code = ?",
+                ("ADMIN",),
+            ).fetchone()
+            user_id = user["id"]
+            project_id = project["id"]
+        finally:
+            conn.close()
+
+        for path, fields in [
+            (
+                "/admin/groups/create",
+                {"name": "Admin Readers", "description": "Read admin project fields"},
+            ),
+        ]:
+            request = urllib.request.Request(
+                f"{base_url}{path}",
+                data=urllib.parse.urlencode(fields).encode("utf-8"),
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                method="POST",
+            )
+            with opener.open(request, timeout=5) as response:
+                assert response.status == 200
+
+        conn = db.connect(database_path)
+        try:
+            group = conn.execute(
+                "select id from user_groups where name = ?",
+                ("Admin Readers",),
+            ).fetchone()
+            group_id = group["id"]
+        finally:
+            conn.close()
+
+        for path, fields in [
+            (
+                "/admin/group-memberships/create",
+                {"user_id": str(user_id), "group_id": str(group_id)},
+            ),
+            (
+                "/admin/permissions/create",
+                {
+                    "group_id": str(group_id),
+                    "operation": "read",
+                    "data_domain": "project",
+                    "field_name": "website",
+                    "project_id": str(project_id),
+                },
+            ),
+            (
+                "/admin/project-aliases/create",
+                {"project_id": str(project_id), "alias": "ADMIN项目部"},
+            ),
+        ]:
+            request = urllib.request.Request(
+                f"{base_url}{path}",
+                data=urllib.parse.urlencode(fields).encode("utf-8"),
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                method="POST",
+            )
+            with opener.open(request, timeout=5) as response:
+                assert response.status == 200
+
+    conn = db.connect(database_path)
+    try:
+        membership = conn.execute(
+            """
+            select * from user_group_memberships
+            where user_id = ? and group_id = ?
+            """,
+            (user_id, group_id),
+        ).fetchone()
+        permission = conn.execute(
+            """
+            select * from permission_grants
+            where group_id = ? and data_domain = ? and field_name = ?
+            """,
+            (group_id, "project", "website"),
+        ).fetchone()
+        alias = conn.execute(
+            "select * from project_aliases where alias = ?",
+            ("ADMIN项目部",),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert membership is not None
+    assert permission is not None
+    assert permission["project_id"] == project_id
+    assert alias is not None
+    assert alias["project_id"] == project_id
 
 
 def test_admin_create_user_form_returns_clear_validation_errors(tmp_path: Path) -> None:
