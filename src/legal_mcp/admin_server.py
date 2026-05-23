@@ -14,10 +14,12 @@ from pathlib import Path
 from typing import Any
 
 from legal_mcp import db
+from legal_mcp.disclosure_audit import list_audit_events
 from legal_mcp.identity import ACTIVE, ROLE_ADMIN, hash_token, verify_password
 
 _SESSION_COOKIE = "lmcp_admin"
 _SESSION_HOURS = 8
+_AUDIT_EVENT_LIMIT = 100
 
 
 class LegalMCPAdminServer(ThreadingHTTPServer):
@@ -147,9 +149,8 @@ class LegalMCPAdminRequestHandler(BaseHTTPRequestHandler):
             conn.close()
         if row is None or row["role"] != ROLE_ADMIN or row["status"] != ACTIVE:
             return None
-        try:
-            expires_at = datetime.fromisoformat(row["expires_at"])
-        except (TypeError, ValueError):
+        expires_at = _parse_session_expires_at(row["expires_at"])
+        if expires_at is None:
             return None
         if expires_at <= datetime.now(timezone.utc):
             return None
@@ -192,14 +193,7 @@ class LegalMCPAdminRequestHandler(BaseHTTPRequestHandler):
     def _send_audit_page(self) -> None:
         conn = db.connect(self.server.database_path)
         try:
-            rows = conn.execute(
-                """
-                select id, timestamp, user_id, source_client, tool_name,
-                       rationale, result_status, error_code, response_record_count
-                from audit_events
-                order by id desc
-                """
-            ).fetchall()
+            rows = list_audit_events(conn, limit=_AUDIT_EVENT_LIMIT)
         finally:
             conn.close()
 
@@ -301,3 +295,13 @@ def build_admin_server(
         LegalMCPAdminRequestHandler,
         database_path=database_path,
     )
+
+
+def _parse_session_expires_at(value: str) -> datetime | None:
+    try:
+        expires_at = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    if expires_at.tzinfo is None:
+        return expires_at.replace(tzinfo=timezone.utc)
+    return expires_at.astimezone(timezone.utc)
