@@ -27,7 +27,26 @@ def get_contract_fields(
         return _error("validation_error", "fields must contain known contract field names")
 
     row = conn.execute(
-        "select * from contracts where contract_number = ? or external_key = ?",
+        """
+        select
+          id,
+          project_id,
+          external_key,
+          title,
+          handler,
+          payment_terms,
+          currency,
+          total_amount,
+          expiry_date,
+          counterparty,
+          company_entity,
+          signed_date,
+          contract_number,
+          income_expense_type,
+          summary
+        from contracts
+        where contract_number = ? or external_key = ?
+        """,
         (contract_number, contract_number),
     ).fetchone()
     if row is None:

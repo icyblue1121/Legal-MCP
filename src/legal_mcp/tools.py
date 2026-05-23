@@ -22,79 +22,6 @@ from legal_mcp.policy import (
 from legal_mcp.tools_contract import get_contract_fields
 from legal_mcp.tools_project import get_project_fields, resolve_project
 
-PROJECT_FIELD_NAMES = {
-    "project_code",
-    "name",
-    "stage",
-    "legal_bp",
-    "department",
-    "release_team",
-    "contact_person",
-    "website",
-    "notes",
-}
-PROJECT_FIELD_IDENTITY_NAMES = ("project_code", "name")
-
-
-TOOL_DEFINITIONS: list[dict[str, Any]] = [
-    {
-        "name": "list_projects",
-        "description": "List legal projects, optionally filtered by stage.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "stage": {"type": "string"},
-                "rationale": {"type": "string"},
-                "source_client": {"type": "string"},
-            },
-            "required": ["rationale"],
-        },
-    },
-    {
-        "name": "get_project_context",
-        "description": "Return a project and related legal context.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "project_id_or_name": {"type": "string"},
-                "fields": {
-                    "type": "array",
-                    "items": {"type": "string", "enum": sorted(PROJECT_FIELD_NAMES)},
-                },
-                "rationale": {"type": "string"},
-                "source_client": {"type": "string"},
-            },
-            "required": ["project_id_or_name", "rationale"],
-        },
-    },
-    {
-        "name": "list_expiring_licenses",
-        "description": "List licenses expiring within a day boundary.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "days_ahead": {"type": "integer", "default": 30},
-                "rationale": {"type": "string"},
-                "source_client": {"type": "string"},
-            },
-            "required": ["rationale"],
-        },
-    },
-    {
-        "name": "list_open_risks",
-        "description": "List open risks, optionally filtered by project code.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "project_code": {"type": "string"},
-                "rationale": {"type": "string"},
-                "source_client": {"type": "string"},
-            },
-            "required": ["rationale"],
-        },
-    },
-]
-
 
 def call_tool(
     tool_name: str,
@@ -216,132 +143,24 @@ def _list_projects(
 
     where = f" where {' and '.join(filters)}" if filters else ""
     rows = conn.execute(
-        f"select * from projects{where} order by project_code",
+        f"""
+        select
+          id,
+          project_code,
+          name,
+          stage,
+          legal_bp,
+          department,
+          release_team,
+          contact_person,
+          website,
+          notes
+        from projects{where}
+        order by project_code
+        """,
         params,
     ).fetchall()
     return {"projects": [dict(row) for row in rows]}
-
-
-def _get_project_context(
-    conn: sqlite3.Connection,
-    arguments: dict[str, Any],
-    access_context: AccessContext | None,
-    disclosures: list[Disclosure],
-) -> dict[str, Any]:
-    query = arguments.get("project_id_or_name")
-    if not isinstance(query, str) or not query.strip():
-        return _error("validation_error", "project_id_or_name is required")
-    fields = _requested_project_fields(arguments)
-    if fields == set():
-        return _error("validation_error", "fields must contain known project field names")
-
-    lookup = lookup_project(conn, query)
-    if lookup.kind == ProjectLookupResult.NOT_FOUND:
-        return _error("not_found", "project not found")
-    if lookup.kind == ProjectLookupResult.AMBIGUOUS:
-        visible = visible_project_ids(conn, access_context)
-        if visible is None:
-            return _error(
-                "ambiguous_project",
-                "project lookup is ambiguous",
-                candidates=lookup.candidates or [],
-            )
-
-        disclosures.extend(
-            Disclosure(
-                project_id=int(candidate["id"]),
-                record_type="project",
-                record_id=int(candidate["id"]),
-                decision="denied",
-                reason="project_hidden",
-            )
-            for candidate in lookup.candidates or []
-            if int(candidate["id"]) not in visible
-        )
-        visible_candidates = [
-            candidate
-            for candidate in lookup.candidates or []
-            if int(candidate["id"]) in visible
-        ]
-        if not visible_candidates:
-            return _error("not_found", "project not found")
-        if len(visible_candidates) == 1:
-            row = conn.execute(
-                "select * from projects where id = ?",
-                (visible_candidates[0]["id"],),
-            ).fetchone()
-            if row is None:
-                return _error("not_found", "project not found")
-            return _project_context(conn, dict(row), fields)
-        return _error(
-            "ambiguous_project",
-            "project lookup is ambiguous",
-            candidates=visible_candidates,
-        )
-
-    project = lookup.project or {}
-    project_id = project["id"]
-    if not project_is_visible(conn, access_context, int(project_id)):
-        disclosures.append(
-            Disclosure(
-                project_id=int(project_id),
-                record_type="project",
-                record_id=int(project_id),
-                decision="denied",
-                reason="project_hidden",
-            )
-        )
-        return _error("not_found", "project not found")
-
-    return _project_context(conn, project, fields)
-
-
-def _requested_project_fields(arguments: dict[str, Any]) -> set[str] | None:
-    fields = arguments.get("fields")
-    if fields is None:
-        return None
-    if not isinstance(fields, list):
-        return set()
-    requested = {field for field in fields if isinstance(field, str)}
-    if len(requested) != len(fields) or not requested.issubset(PROJECT_FIELD_NAMES):
-        return set()
-    return requested
-
-
-def _project_context(
-    conn: sqlite3.Connection,
-    project: dict[str, Any],
-    fields: set[str] | None = None,
-) -> dict[str, Any]:
-    if fields is not None:
-        projected_fields = [*PROJECT_FIELD_IDENTITY_NAMES, *sorted(fields)]
-        return {
-            "project": {
-                field: project.get(field)
-                for field in projected_fields
-                if field in project
-            }
-        }
-
-    project_id = project["id"]
-    licenses = conn.execute(
-        "select * from licenses where project_id = ? order by external_key",
-        (project_id,),
-    ).fetchall()
-    contracts = conn.execute(
-        "select * from contracts where project_id = ? order by external_key",
-        (project_id,),
-    ).fetchall()
-    risks = conn.execute(
-        "select * from risks where project_id = ? order by external_key",
-        (project_id,),
-    ).fetchall()
-    return {
-        "project": project,
-        "licenses": [dict(row) for row in licenses],
-        "contracts": [dict(row) for row in contracts],
-        "risks": [dict(row) for row in risks],
-    }
 
 
 def _list_expiring_licenses(
