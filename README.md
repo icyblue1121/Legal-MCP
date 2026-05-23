@@ -131,7 +131,7 @@ legal-mcp admin create-user \
   --db /data/legal.db
 
 legal-mcp serve-admin \
-  --host 0.0.0.0 \
+  --host 127.0.0.1 \
   --port 8766 \
   --db /data/legal.db
 ```
@@ -139,6 +139,22 @@ legal-mcp serve-admin \
 The Admin Web UI creates `legal`, `business`, and `auditor` users, issues
 per-user API keys, and grants project access for users who need scoped project
 visibility.
+
+For v1.2 clients, use each user's Admin-generated API key as the MCP proxy
+token:
+
+```sh
+export LEGAL_MCP_API_KEY="lmcp_replace_with_the_user_api_key"
+
+legal-mcp setup \
+  --client codex \
+  --remote-url http://legal-mcp.internal:8765/mcp \
+  --token "$LEGAL_MCP_API_KEY"
+```
+
+Keep the Admin Web UI on `127.0.0.1` and manage it through an SSH tunnel, or
+put it behind a TLS reverse proxy before binding it to a network interface. The
+Admin UI handles passwords, session cookies, and one-time API key display.
 
 Keep deployment notes that contain hostnames, client paths, tokens, or real data
 in local documents outside Git.

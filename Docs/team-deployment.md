@@ -96,10 +96,15 @@ Run the lightweight Admin Web UI:
 
 ```sh
 legal-mcp serve-admin \
-  --host 0.0.0.0 \
+  --host 127.0.0.1 \
   --port 8766 \
   --db /data/legal.db
 ```
+
+Keep Admin Web bound to `127.0.0.1` and reach it through an SSH tunnel, or put
+it behind a TLS reverse proxy before binding it to a network interface. Admin
+Web handles passwords, session cookies, and one-time API key display, so do not
+serve it as plain HTTP on an intranet.
 
 Use the Admin Web UI to create legal, business, and auditor users, issue
 per-user API keys, and grant project access. Legal and admin users can see all
@@ -114,16 +119,18 @@ Each team member installs Legal-MCP locally and configures their AI client to ru
 Codex:
 
 ```sh
+export LEGAL_MCP_API_KEY="lmcp_replace_with_the_user_api_key"
+
 legal-mcp setup \
   --client codex \
   --remote-url http://legal-mcp.internal:8765/mcp \
-  --token "$LEGAL_MCP_TOKEN"
+  --token "$LEGAL_MCP_API_KEY"
 ```
 
 Equivalent one-line form:
 
 ```sh
-legal-mcp setup --client codex --remote-url http://legal-mcp.internal:8765/mcp --token "$LEGAL_MCP_TOKEN"
+legal-mcp setup --client codex --remote-url http://legal-mcp.internal:8765/mcp --token "$LEGAL_MCP_API_KEY"
 ```
 
 Cursor:
@@ -132,7 +139,7 @@ Cursor:
 legal-mcp setup \
   --client cursor \
   --remote-url http://legal-mcp.internal:8765/mcp \
-  --token "$LEGAL_MCP_TOKEN"
+  --token "$LEGAL_MCP_API_KEY"
 ```
 
 Generic stdio config:
@@ -141,14 +148,17 @@ Generic stdio config:
 legal-mcp setup \
   --client generic \
   --remote-url http://legal-mcp.internal:8765/mcp \
-  --token "$LEGAL_MCP_TOKEN"
+  --token "$LEGAL_MCP_API_KEY"
 ```
 
 The generated stdio entry runs:
 
 ```sh
-legal-mcp proxy --url http://legal-mcp.internal:8765/mcp --token "$LEGAL_MCP_TOKEN"
+legal-mcp proxy --url http://legal-mcp.internal:8765/mcp --token "$LEGAL_MCP_API_KEY"
 ```
+
+For v1.1 shared-token pilots only, use `LEGAL_MCP_TOKEN` instead. In v1.2,
+using the shared token bypasses named-user attribution and project grants.
 
 ## Smoke test
 
@@ -180,7 +190,8 @@ result status, and disclosure decision.
 
 ## Operational rules
 
-- Rotate `LEGAL_MCP_TOKEN` if a team member leaves the pilot.
+- Rotate `LEGAL_MCP_TOKEN` if a team member leaves a v1.1 pilot. For v1.2,
+  revoke that user's API key and remove project grants.
 - Keep `/data/legal.db` and `/data/audit.jsonl` on an encrypted disk or protected intranet server.
 - The v1.1 HTTP server is intended for trusted intranet use.
 - Use a reverse proxy with TLS before exposing the service beyond a trusted internal network.

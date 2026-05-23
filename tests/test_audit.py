@@ -1,4 +1,5 @@
 import json
+import sqlite3
 
 from legal_mcp import db
 from legal_mcp.identity import ROLE_AUDITOR, ROLE_BUSINESS, ROLE_LEGAL, create_user
@@ -384,3 +385,37 @@ def test_auditor_denial_records_database_audit_event_without_disclosure(tmp_path
     assert event["result_status"] == "error"
     assert event["error_code"] == "access_denied"
     assert disclosure_count == 0
+
+
+def test_database_audit_failure_preserves_tool_response_and_warns(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        conn.execute(
+            "insert into projects (project_code, name, stage) values (?, ?, ?)",
+            ("GAME-001", "Project One", "live"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    def fail_audit(*args, **kwargs):
+        raise sqlite3.OperationalError("audit store unavailable")
+
+    monkeypatch.setattr("legal_mcp.tools.write_audit_event", fail_audit)
+
+    result = call_tool(
+        "list_projects",
+        {"rationale": "status review"},
+        database_path=database_path,
+    )
+
+    captured = capsys.readouterr()
+    assert [project["project_code"] for project in result["projects"]] == ["GAME-001"]
+    assert "database audit write failed" in captured.err
+    assert "audit store unavailable" in captured.err

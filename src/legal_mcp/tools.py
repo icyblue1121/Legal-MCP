@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import sys
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
@@ -420,7 +421,8 @@ def _audit_database(
             )
         finally:
             conn.close()
-    except sqlite3.Error:
+    except sqlite3.Error as exc:
+        print(f"legal-mcp: database audit write failed: {exc}", file=sys.stderr)
         return
 
 
