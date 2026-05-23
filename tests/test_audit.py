@@ -42,7 +42,7 @@ def test_audit_log_records_successful_and_failed_tool_calls(tmp_path) -> None:
     assert records[0]["error_code"] is None
     assert records[1]["tool_name"] == "get_project_context"
     assert records[1]["result_status"] == "error"
-    assert records[1]["error_code"] == "not_found"
+    assert records[1]["error_code"] == "deprecated_tool"
     assert "Missing" in records[1]["arguments_summary"]
 
 
@@ -81,9 +81,8 @@ def test_tool_call_writes_database_audit_event_and_project_disclosure(tmp_path) 
         conn.close()
 
     call_tool(
-        "get_project_context",
+        "list_projects",
         {
-            "project_id_or_name": "GAME-001",
             "rationale": "prepare business summary",
             "source_client": "pytest-client",
         },
@@ -100,7 +99,7 @@ def test_tool_call_writes_database_audit_event_and_project_disclosure(tmp_path) 
         conn.close()
 
     assert event["user_id"] == business_user["id"]
-    assert event["tool_name"] == "get_project_context"
+    assert event["tool_name"] == "list_projects"
     assert event["rationale"] == "prepare business summary"
     assert event["source_client"] == "pytest-client"
     assert disclosure["project_id"] == project_id
@@ -144,14 +143,12 @@ def test_hidden_project_lookup_records_denied_disclosure_without_leaking_project
     finally:
         conn.close()
 
-    assert result["error"]["code"] == "not_found"
+    assert result["error"]["code"] == "deprecated_tool"
     assert result["error"]["candidates"] == []
     assert result["error"]["details"] == {}
     assert event["result_status"] == "error"
-    assert event["error_code"] == "not_found"
-    assert disclosure["project_id"] == hidden_project_id
-    assert disclosure["record_type"] == "project"
-    assert disclosure["decision"] == "denied"
+    assert event["error_code"] == "deprecated_tool"
+    assert disclosure is None
 
 
 def test_hidden_ambiguous_lookup_records_denied_disclosures_without_candidates(
@@ -195,14 +192,9 @@ def test_hidden_ambiguous_lookup_records_denied_disclosures_without_candidates(
     finally:
         conn.close()
 
-    assert result["error"]["code"] == "not_found"
+    assert result["error"]["code"] == "deprecated_tool"
     assert result["error"]["candidates"] == []
-    assert [disclosure["project_id"] for disclosure in disclosures] == [
-        first_project_id,
-        second_project_id,
-    ]
-    assert {disclosure["record_type"] for disclosure in disclosures} == {"project"}
-    assert {disclosure["decision"] for disclosure in disclosures} == {"denied"}
+    assert disclosures == []
 
 
 def test_visible_ambiguous_lookup_records_allowed_candidate_disclosures(
@@ -266,22 +258,9 @@ def test_visible_ambiguous_lookup_records_allowed_candidate_disclosures(
     finally:
         conn.close()
 
-    assert result["error"]["code"] == "ambiguous_project"
-    assert [candidate["project_code"] for candidate in result["error"]["candidates"]] == [
-        "GAME-001",
-        "GAME-002",
-    ]
-    assert [disclosure["project_id"] for disclosure in disclosures] == [
-        first_project_id,
-        second_project_id,
-    ]
-    assert [disclosure["record_id"] for disclosure in disclosures] == [
-        first_project_id,
-        second_project_id,
-    ]
-    assert {disclosure["record_type"] for disclosure in disclosures} == {"project"}
-    assert {disclosure["decision"] for disclosure in disclosures} == {"allowed"}
-    assert {disclosure["reason"] for disclosure in disclosures} == {"project_visible"}
+    assert result["error"]["code"] == "deprecated_tool"
+    assert result["error"]["candidates"] == []
+    assert disclosures == []
 
 
 def test_open_risks_hidden_project_code_records_denied_disclosure_without_leak(

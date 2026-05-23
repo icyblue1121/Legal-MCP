@@ -80,14 +80,15 @@ def test_handle_tool_call_returns_json_text_content(tmp_path: Path) -> None:
         {
             "jsonrpc": "2.0",
             "id": 3,
-            "method": "tools/call",
-            "params": {
-                "name": "get_project_context",
-                "arguments": {
-                    "project_id_or_name": "Mgame",
-                    "rationale": "team deployment smoke test",
-                    "source_client": "pytest",
-                },
+                "method": "tools/call",
+                "params": {
+                    "name": "get_project_fields",
+                    "arguments": {
+                        "project_id_or_name": "Mgame",
+                        "fields": ["contact_person"],
+                        "rationale": "team deployment smoke test",
+                        "source_client": "pytest",
+                    },
             },
         },
         database_path=database_path,
@@ -121,14 +122,15 @@ def test_handle_tool_call_uses_access_context_to_hide_ungranted_project(tmp_path
         {
             "jsonrpc": "2.0",
             "id": 4,
-            "method": "tools/call",
-            "params": {
-                "name": "get_project_context",
-                "arguments": {
-                    "project_id_or_name": "Mgame",
-                    "rationale": "team deployment smoke test",
-                    "source_client": "pytest",
-                },
+                "method": "tools/call",
+                "params": {
+                    "name": "get_project_fields",
+                    "arguments": {
+                        "project_id_or_name": "Mgame",
+                        "fields": ["contact_person"],
+                        "rationale": "team deployment smoke test",
+                        "source_client": "pytest",
+                    },
             },
         },
         database_path=database_path,

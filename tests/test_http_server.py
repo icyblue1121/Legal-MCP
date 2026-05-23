@@ -95,9 +95,10 @@ def test_http_mcp_tools_call_returns_project_context(http_service) -> None:
             "id": 1,
             "method": "tools/call",
             "params": {
-                "name": "get_project_context",
+                "name": "get_project_fields",
                 "arguments": {
                     "project_id_or_name": "Mgame",
+                    "fields": ["contact_person"],
                     "rationale": "team query",
                     "source_client": "pytest-http",
                 },
@@ -159,9 +160,10 @@ def test_http_mcp_accepts_named_user_api_key_for_granted_project(tmp_path: Path)
                 "id": 1,
                 "method": "tools/call",
                 "params": {
-                    "name": "get_project_context",
+                    "name": "get_project_fields",
                     "arguments": {
                         "project_id_or_name": "Mgame",
+                        "fields": ["project_code"],
                         "rationale": "team query",
                         "source_client": "pytest-http",
                     },

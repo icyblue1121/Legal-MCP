@@ -65,9 +65,10 @@ def test_stdio_server_lists_tools_and_calls_get_project_context(tmp_path) -> Non
                     "id": 3,
                     "method": "tools/call",
                     "params": {
-                        "name": "get_project_context",
+                        "name": "get_project_fields",
                         "arguments": {
                             "project_id_or_name": "GAME-001",
+                            "fields": ["project_code"],
                             "rationale": "contract review",
                         },
                     },

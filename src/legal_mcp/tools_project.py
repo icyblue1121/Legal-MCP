@@ -1,0 +1,71 @@
+"""Fine-grained project MCP tools."""
+
+from __future__ import annotations
+
+import sqlite3
+from typing import Any
+
+from legal_mcp.lookup import ProjectLookupResult, lookup_project
+from legal_mcp.policy import AccessContext, project_is_visible
+from legal_mcp.tool_catalog import PROJECT_FIELDS
+
+PROJECT_IDENTITY_FIELDS = ("project_code", "name")
+
+
+def get_project_fields(
+    conn: sqlite3.Connection,
+    arguments: dict[str, Any],
+    access_context: AccessContext | None,
+) -> dict[str, Any]:
+    query = arguments.get("project_id_or_name")
+    fields = arguments.get("fields")
+    if not isinstance(query, str) or not query.strip():
+        return _error("validation_error", "project_id_or_name is required")
+    if not isinstance(fields, list) or not fields:
+        return _error("validation_error", "fields is required")
+    requested = {field for field in fields if isinstance(field, str)}
+    if len(requested) != len(fields) or not requested.issubset(set(PROJECT_FIELDS)):
+        return _error("validation_error", "fields must contain known project field names")
+
+    lookup = lookup_project(conn, query)
+    if lookup.kind != ProjectLookupResult.FOUND:
+        return _error("not_found", "project not found")
+    project = lookup.project or {}
+    project_id = int(project["id"])
+    if not project_is_visible(conn, access_context, project_id):
+        return _error("not_found", "project not found")
+
+    projected = [*PROJECT_IDENTITY_FIELDS, *sorted(requested)]
+    return {
+        "project": {
+            field: project.get(field)
+            for field in projected
+            if field in project
+        }
+    }
+
+
+def resolve_project(
+    conn: sqlite3.Connection,
+    arguments: dict[str, Any],
+    access_context: AccessContext | None,
+) -> dict[str, Any]:
+    query = arguments.get("query")
+    if not isinstance(query, str) or not query.strip():
+        return _error("validation_error", "query is required")
+    lookup = lookup_project(conn, query)
+    if lookup.kind != ProjectLookupResult.FOUND:
+        return _error("not_found", "project not found")
+    project = lookup.project or {}
+    if not project_is_visible(conn, access_context, int(project["id"])):
+        return _error("not_found", "project not found")
+    return {
+        "project": {
+            "project_code": project["project_code"],
+            "name": project["name"],
+        }
+    }
+
+
+def _error(code: str, message: str) -> dict[str, Any]:
+    return {"error": {"code": code, "message": message, "candidates": [], "details": {}}}

@@ -18,6 +18,7 @@ from legal_mcp.policy import (
     project_is_visible,
     visible_project_ids,
 )
+from legal_mcp.tools_project import get_project_fields, resolve_project
 
 PROJECT_FIELD_NAMES = {
     "project_code",
@@ -139,8 +140,15 @@ def call_tool(
         try:
             if tool_name == "list_projects":
                 result = _list_projects(conn, arguments, access_context)
+            elif tool_name == "resolve_project":
+                result = resolve_project(conn, arguments, access_context)
+            elif tool_name == "get_project_fields":
+                result = get_project_fields(conn, arguments, access_context)
             elif tool_name == "get_project_context":
-                result = _get_project_context(conn, arguments, access_context, disclosures)
+                result = _error(
+                    "deprecated_tool",
+                    "get_project_context is deprecated; use fine-grained field tools",
+                )
             elif tool_name == "list_expiring_licenses":
                 result = _list_expiring_licenses(conn, arguments, access_context)
             elif tool_name == "list_open_risks":

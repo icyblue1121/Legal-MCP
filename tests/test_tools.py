@@ -62,7 +62,7 @@ def test_all_tools_require_rationale(tmp_path) -> None:
         assert result["error"]["code"] == "missing_rationale"
 
 
-def test_get_project_context_includes_project_fields_and_all_licenses(tmp_path) -> None:
+def test_get_project_fields_includes_requested_project_fields(tmp_path) -> None:
     database_path = tmp_path / "legal.db"
     db.initialize_database(database_path)
     conn = db.connect(database_path)
@@ -82,8 +82,12 @@ def test_get_project_context_includes_project_fields_and_all_licenses(tmp_path) 
         conn.close()
 
     result = call_tool(
-        "get_project_context",
-        {"project_id_or_name": "GAME-001", "rationale": "draft contract context"},
+        "get_project_fields",
+        {
+            "project_id_or_name": "GAME-001",
+            "fields": ["legal_bp", "department", "release_team", "contact_person", "website"],
+            "rationale": "draft contract context",
+        },
         database_path=database_path,
     )
 
@@ -93,11 +97,9 @@ def test_get_project_context_includes_project_fields_and_all_licenses(tmp_path) 
     assert result["project"]["release_team"] == "Release A"
     assert result["project"]["contact_person"] == "Morgan"
     assert result["project"]["website"] == "https://example.test"
-    assert result["licenses"][0]["external_key"] == "publication"
-    assert result["licenses"][0]["expiry_date"] is None
 
 
-def test_get_project_context_with_fields_returns_only_requested_project_fields(
+def test_resolve_project_returns_identity_fields(
     tmp_path,
 ) -> None:
     database_path = tmp_path / "legal.db"
@@ -109,7 +111,51 @@ def test_get_project_context_with_fields_returns_only_requested_project_fields(
         conn.close()
 
     result = call_tool(
-        "get_project_context",
+        "resolve_project",
+        {
+            "query": "MGAME",
+            "rationale": "query official website",
+        },
+        database_path=database_path,
+    )
+
+    assert result == {
+        "project": {
+            "project_code": "MGAME",
+            "name": "MGame",
+        }
+    }
+
+
+def test_get_project_fields_requires_fields(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        seed_project(conn, code="MGAME", name="MGame")
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "get_project_fields",
+        {"project_id_or_name": "MGAME", "rationale": "query project"},
+        database_path=database_path,
+    )
+
+    assert result["error"]["code"] == "validation_error"
+
+
+def test_get_project_fields_returns_only_requested_fields(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        seed_project(conn, code="MGAME", name="MGame")
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "get_project_fields",
         {
             "project_id_or_name": "MGAME",
             "fields": ["website"],
@@ -127,7 +173,25 @@ def test_get_project_context_with_fields_returns_only_requested_project_fields(
     }
 
 
-def test_ambiguous_project_context_returns_structured_error(tmp_path) -> None:
+def test_get_project_context_rejects_full_context_calls(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        seed_project(conn, code="MGAME", name="MGame")
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "get_project_context",
+        {"project_id_or_name": "MGAME", "rationale": "legacy query"},
+        database_path=database_path,
+    )
+
+    assert result["error"]["code"] == "deprecated_tool"
+
+
+def test_resolve_project_returns_not_found_for_ambiguous_project(tmp_path) -> None:
     database_path = tmp_path / "legal.db"
     db.initialize_database(database_path)
     conn = db.connect(database_path)
@@ -138,16 +202,12 @@ def test_ambiguous_project_context_returns_structured_error(tmp_path) -> None:
         conn.close()
 
     result = call_tool(
-        "get_project_context",
-        {"project_id_or_name": "Shared Name", "rationale": "review status"},
+        "resolve_project",
+        {"query": "Shared Name", "rationale": "review status"},
         database_path=database_path,
     )
 
-    assert result["error"]["code"] == "ambiguous_project"
-    assert [candidate["project_code"] for candidate in result["error"]["candidates"]] == [
-        "GAME-001",
-        "GAME-002",
-    ]
+    assert result["error"]["code"] == "not_found"
 
 
 def test_expiring_license_boundaries_exclude_null_and_late_dates(tmp_path) -> None:
@@ -351,7 +411,7 @@ def test_list_projects_filters_to_business_project_access_grants(tmp_path) -> No
     assert [project["project_code"] for project in result["projects"]] == ["GAME-001"]
 
 
-def test_get_project_context_returns_not_found_for_hidden_project(tmp_path) -> None:
+def test_get_project_fields_returns_not_found_for_hidden_project(tmp_path) -> None:
     database_path = tmp_path / "legal.db"
     db.initialize_database(database_path)
     conn = db.connect(database_path)
@@ -369,8 +429,12 @@ def test_get_project_context_returns_not_found_for_hidden_project(tmp_path) -> N
         conn.close()
 
     result = call_tool(
-        "get_project_context",
-        {"project_id_or_name": "GAME-002", "rationale": "review project context"},
+        "get_project_fields",
+        {
+            "project_id_or_name": "GAME-002",
+            "fields": ["website"],
+            "rationale": "review project context",
+        },
         database_path=database_path,
         access_context=context,
     )
@@ -378,7 +442,7 @@ def test_get_project_context_returns_not_found_for_hidden_project(tmp_path) -> N
     assert result["error"]["code"] == "not_found"
 
 
-def test_get_project_context_resolves_visible_candidate_when_hidden_name_is_ambiguous(
+def test_get_project_fields_returns_not_found_when_name_is_ambiguous(
     tmp_path,
 ) -> None:
     database_path = tmp_path / "legal.db"
@@ -399,16 +463,20 @@ def test_get_project_context_resolves_visible_candidate_when_hidden_name_is_ambi
         conn.close()
 
     result = call_tool(
-        "get_project_context",
-        {"project_id_or_name": "Shared Name", "rationale": "review project context"},
+        "get_project_fields",
+        {
+            "project_id_or_name": "Shared Name",
+            "fields": ["website"],
+            "rationale": "review project context",
+        },
         database_path=database_path,
         access_context=context,
     )
 
-    assert result["project"]["project_code"] == "GAME-001"
+    assert result["error"]["code"] == "not_found"
 
 
-def test_get_project_context_ambiguous_candidates_include_only_visible_projects(
+def test_get_project_fields_returns_not_found_for_ambiguous_visible_projects(
     tmp_path,
 ) -> None:
     database_path = tmp_path / "legal.db"
@@ -435,20 +503,20 @@ def test_get_project_context_ambiguous_candidates_include_only_visible_projects(
         conn.close()
 
     result = call_tool(
-        "get_project_context",
-        {"project_id_or_name": "Shared Name", "rationale": "review project context"},
+        "get_project_fields",
+        {
+            "project_id_or_name": "Shared Name",
+            "fields": ["website"],
+            "rationale": "review project context",
+        },
         database_path=database_path,
         access_context=context,
     )
 
-    assert result["error"]["code"] == "ambiguous_project"
-    assert [candidate["project_code"] for candidate in result["error"]["candidates"]] == [
-        "GAME-001",
-        "GAME-002",
-    ]
+    assert result["error"]["code"] == "not_found"
 
 
-def test_get_project_context_hidden_ambiguous_candidates_return_not_found(
+def test_get_project_fields_hidden_ambiguous_candidates_return_not_found(
     tmp_path,
 ) -> None:
     database_path = tmp_path / "legal.db"
@@ -468,8 +536,12 @@ def test_get_project_context_hidden_ambiguous_candidates_return_not_found(
         conn.close()
 
     result = call_tool(
-        "get_project_context",
-        {"project_id_or_name": "Shared Name", "rationale": "review project context"},
+        "get_project_fields",
+        {
+            "project_id_or_name": "Shared Name",
+            "fields": ["website"],
+            "rationale": "review project context",
+        },
         database_path=database_path,
         access_context=context,
     )
@@ -506,7 +578,7 @@ def test_legal_user_list_projects_filters_to_project_access_grants(tmp_path) -> 
     assert [project["project_code"] for project in result["projects"]] == ["GAME-001"]
 
 
-def test_legal_user_get_project_context_returns_not_found_for_hidden_project(tmp_path) -> None:
+def test_legal_user_get_project_fields_returns_not_found_for_hidden_project(tmp_path) -> None:
     database_path = tmp_path / "legal.db"
     db.initialize_database(database_path)
     conn = db.connect(database_path)
@@ -525,8 +597,12 @@ def test_legal_user_get_project_context_returns_not_found_for_hidden_project(tmp
         conn.close()
 
     result = call_tool(
-        "get_project_context",
-        {"project_id_or_name": "OTHER", "rationale": "review project context"},
+        "get_project_fields",
+        {
+            "project_id_or_name": "OTHER",
+            "fields": ["website"],
+            "rationale": "review project context",
+        },
         database_path=database_path,
         access_context=context,
     )
