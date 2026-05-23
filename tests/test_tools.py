@@ -191,6 +191,52 @@ def test_get_project_context_rejects_full_context_calls(tmp_path) -> None:
     assert result["error"]["code"] == "deprecated_tool"
 
 
+def test_get_contract_fields_returns_only_requested_amount(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        project_id = seed_project(conn, code="MGAME", name="MGame")
+        conn.execute(
+            """
+            insert into contracts (
+              project_id, external_key, title, contract_number, total_amount, currency
+            )
+            values (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                project_id,
+                "SHYBYBZ2025000082",
+                "MGame KOL Contract",
+                "SHYBYBZ2025000082",
+                "11690",
+                "人民币",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "get_contract_fields",
+        {
+            "contract_number": "SHYBYBZ2025000082",
+            "fields": ["total_amount", "currency"],
+            "rationale": "query contract amount",
+        },
+        database_path=database_path,
+    )
+
+    assert result == {
+        "contract": {
+            "contract_number": "SHYBYBZ2025000082",
+            "title": "MGame KOL Contract",
+            "currency": "人民币",
+            "total_amount": "11690",
+        }
+    }
+
+
 def test_resolve_project_returns_not_found_for_ambiguous_project(tmp_path) -> None:
     database_path = tmp_path / "legal.db"
     db.initialize_database(database_path)
