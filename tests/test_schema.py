@@ -171,6 +171,26 @@ def test_initialize_database_records_schema_version(tmp_path) -> None:
     assert row["version"] == 13
 
 
+def test_initialize_database_creates_group_permission_and_alias_tables(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        tables = {
+            row["name"]
+            for row in conn.execute(
+                "select name from sqlite_master where type = 'table'"
+            )
+        }
+    finally:
+        conn.close()
+
+    assert "user_groups" in tables
+    assert "user_group_memberships" in tables
+    assert "permission_grants" in tables
+    assert "project_aliases" in tables
+
+
 def test_initialize_database_creates_required_tables_and_columns(tmp_path) -> None:
     db_path = tmp_path / "legal.db"
 

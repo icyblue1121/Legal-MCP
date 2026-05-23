@@ -104,6 +104,43 @@ create table if not exists project_access (
   unique(user_id, project_id)
 );
 
+create table if not exists user_groups (
+  id integer primary key,
+  name text not null unique,
+  description text,
+  created_at text not null default (datetime('now')),
+  updated_at text not null default (datetime('now'))
+);
+
+create table if not exists user_group_memberships (
+  id integer primary key,
+  user_id integer not null references users(id),
+  group_id integer not null references user_groups(id),
+  created_at text not null default (datetime('now')),
+  unique(user_id, group_id)
+);
+
+create table if not exists permission_grants (
+  id integer primary key,
+  group_id integer not null references user_groups(id),
+  operation text not null,
+  data_domain text not null,
+  field_name text,
+  project_id integer references projects(id),
+  allowed integer not null default 1 check (allowed in (0, 1)),
+  created_at text not null default (datetime('now')),
+  unique(group_id, operation, data_domain, field_name, project_id)
+);
+
+create table if not exists project_aliases (
+  id integer primary key,
+  project_id integer not null references projects(id),
+  alias text not null unique,
+  source text,
+  created_at text not null default (datetime('now')),
+  updated_at text not null default (datetime('now'))
+);
+
 create table if not exists admin_sessions (
   id integer primary key,
   user_id integer not null references users(id),
@@ -146,6 +183,9 @@ create index if not exists idx_users_external_subject on users(external_subject)
 create index if not exists idx_api_keys_key_prefix on api_keys(key_prefix);
 create index if not exists idx_api_keys_user_id on api_keys(user_id);
 create index if not exists idx_project_access_project_id on project_access(project_id);
+create index if not exists idx_user_group_memberships_user_id on user_group_memberships(user_id);
+create index if not exists idx_permission_grants_group_id on permission_grants(group_id);
+create index if not exists idx_project_aliases_project_id on project_aliases(project_id);
 create index if not exists idx_admin_sessions_user_id on admin_sessions(user_id);
 create index if not exists idx_audit_events_timestamp on audit_events(timestamp);
 create index if not exists idx_audit_events_user_id on audit_events(user_id);

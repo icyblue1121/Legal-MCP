@@ -14,6 +14,7 @@ from legal_mcp.identity import (
 )
 from legal_mcp.policy import (
     AccessContext,
+    authorize_fields,
     can_query_content,
     project_is_visible,
     visible_project_ids,
@@ -161,3 +162,45 @@ def test_auditor_visible_project_ids_is_empty_and_cannot_query_content(
 
     assert can_query_content(context) is False
     assert visible_project_ids(conn, context) == set()
+
+
+def test_group_permission_allows_only_granted_project_fields(
+    conn: sqlite3.Connection,
+) -> None:
+    project_id = _project(conn, "MGAME")
+    user = create_user(
+        conn,
+        email="legal-fields@example.com",
+        display_name="Legal Fields",
+        role=ROLE_LEGAL,
+    )
+    group_id = conn.execute(
+        "insert into user_groups (name) values (?)",
+        ("MGAME Field Readers",),
+    ).lastrowid
+    conn.execute(
+        "insert into user_group_memberships (user_id, group_id) values (?, ?)",
+        (user["id"], group_id),
+    )
+    conn.execute(
+        """
+        insert into permission_grants
+          (group_id, operation, data_domain, field_name, project_id)
+        values (?, ?, ?, ?, ?)
+        """,
+        (group_id, "read", "project", "website", project_id),
+    )
+    conn.commit()
+
+    context = AccessContext.from_user(user)
+    decision = authorize_fields(
+        conn,
+        context,
+        operation="read",
+        data_domain="project",
+        project_id=project_id,
+        requested_fields={"website", "legal_bp"},
+    )
+
+    assert decision.allowed_fields == {"website"}
+    assert decision.denied_fields == {"legal_bp": "field_not_granted"}
