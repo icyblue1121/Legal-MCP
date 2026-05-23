@@ -44,6 +44,40 @@ def test_cli_accepts_serve_http_options() -> None:
     assert args.allowed_origins == ["http://legal.internal"]
 
 
+def test_admin_create_user_parser() -> None:
+    parser = main.__globals__["build_parser"]()
+
+    args = parser.parse_args(
+        [
+            "admin",
+            "create-user",
+            "--email",
+            "admin@example.com",
+            "--display-name",
+            "Admin User",
+            "--role",
+            "admin",
+            "--password",
+            "secret",
+        ]
+    )
+
+    assert args.command == "admin"
+    assert args.admin_command == "create-user"
+    assert args.email == "admin@example.com"
+    assert args.role == "admin"
+
+
+def test_serve_admin_parser() -> None:
+    parser = main.__globals__["build_parser"]()
+
+    args = parser.parse_args(["serve-admin", "--host", "0.0.0.0", "--port", "8766"])
+
+    assert args.command == "serve-admin"
+    assert args.host == "0.0.0.0"
+    assert args.port == 8766
+
+
 def test_cli_accepts_proxy_options() -> None:
     parser = main.__globals__["build_parser"]()
 
