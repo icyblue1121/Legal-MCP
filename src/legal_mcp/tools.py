@@ -9,6 +9,7 @@ from typing import Any
 
 from legal_mcp import db
 from legal_mcp.audit import DEFAULT_AUDIT_PATH, write_audit_record
+from legal_mcp.disclosure_audit import Disclosure, write_audit_event
 from legal_mcp.lookup import ProjectLookupResult, lookup_project
 from legal_mcp.policy import (
     AccessContext,
@@ -87,20 +88,41 @@ def call_tool(
     if not isinstance(rationale, str) or not rationale.strip():
         result = _error("missing_rationale", "rationale is required")
         _audit(tool_name, rationale, source_client, arguments, result, audit_path)
+        _audit_database(
+            database_path,
+            access_context,
+            tool_name,
+            rationale,
+            source_client,
+            arguments,
+            result,
+            [],
+        )
         return result
 
     if not can_query_content(access_context):
         result = _error("access_denied", "user is not allowed to query project content")
         _audit(tool_name, rationale, source_client, arguments, result, audit_path)
+        _audit_database(
+            database_path,
+            access_context,
+            tool_name,
+            rationale,
+            source_client,
+            arguments,
+            result,
+            [],
+        )
         return result
 
+    disclosures: list[Disclosure] = []
     try:
         conn = db.connect(database_path)
         try:
             if tool_name == "list_projects":
                 result = _list_projects(conn, arguments, access_context)
             elif tool_name == "get_project_context":
-                result = _get_project_context(conn, arguments, access_context)
+                result = _get_project_context(conn, arguments, access_context, disclosures)
             elif tool_name == "list_expiring_licenses":
                 result = _list_expiring_licenses(conn, arguments, access_context)
             elif tool_name == "list_open_risks":
@@ -112,7 +134,18 @@ def call_tool(
     except sqlite3.Error as exc:
         result = _error("database_error", "database operation failed", details={"reason": str(exc)})
 
+    disclosures.extend(_disclosures_from_result(result))
     _audit(tool_name, rationale, source_client, arguments, result, audit_path)
+    _audit_database(
+        database_path,
+        access_context,
+        tool_name,
+        rationale,
+        source_client,
+        arguments,
+        result,
+        disclosures,
+    )
     return result
 
 
@@ -148,6 +181,7 @@ def _get_project_context(
     conn: sqlite3.Connection,
     arguments: dict[str, Any],
     access_context: AccessContext | None,
+    disclosures: list[Disclosure],
 ) -> dict[str, Any]:
     query = arguments.get("project_id_or_name")
     if not isinstance(query, str) or not query.strip():
@@ -165,6 +199,17 @@ def _get_project_context(
                 candidates=lookup.candidates or [],
             )
 
+        disclosures.extend(
+            Disclosure(
+                project_id=int(candidate["id"]),
+                record_type="project",
+                record_id=int(candidate["id"]),
+                decision="denied",
+                reason="project_hidden",
+            )
+            for candidate in lookup.candidates or []
+            if int(candidate["id"]) not in visible
+        )
         visible_candidates = [
             candidate
             for candidate in lookup.candidates or []
@@ -189,6 +234,15 @@ def _get_project_context(
     project = lookup.project or {}
     project_id = project["id"]
     if not project_is_visible(conn, access_context, int(project_id)):
+        disclosures.append(
+            Disclosure(
+                project_id=int(project_id),
+                record_type="project",
+                record_id=int(project_id),
+                decision="denied",
+                reason="project_hidden",
+            )
+        )
         return _error("not_found", "project not found")
 
     return _project_context(conn, project)
@@ -320,4 +374,78 @@ def _audit(
         result_status="error" if error else "success",
         error_code=error["code"] if error else None,
         audit_path=audit_path,
+    )
+
+
+def _audit_database(
+    database_path: str | Path,
+    access_context: AccessContext | None,
+    tool_name: str,
+    rationale: str | None,
+    source_client: str | None,
+    arguments: dict[str, Any],
+    result: dict[str, Any],
+    disclosures: list[Disclosure],
+) -> None:
+    try:
+        conn = db.connect(database_path)
+        try:
+            write_audit_event(
+                conn,
+                context=access_context,
+                tool_name=tool_name,
+                rationale=rationale,
+                source_client=source_client,
+                arguments=arguments,
+                result=result,
+                disclosures=disclosures,
+            )
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return
+
+
+def _disclosures_from_result(result: dict[str, Any]) -> list[Disclosure]:
+    if result.get("error"):
+        return []
+
+    disclosures: list[Disclosure] = []
+    project = result.get("project")
+    if isinstance(project, dict):
+        disclosure = _disclosure_from_record(project, "project", project)
+        if disclosure is not None:
+            disclosures.append(disclosure)
+
+    for project_record in result.get("projects", []):
+        if isinstance(project_record, dict):
+            disclosure = _disclosure_from_record(project_record, "project", project_record)
+            if disclosure is not None:
+                disclosures.append(disclosure)
+
+    for record_type in ("licenses", "contracts", "risks"):
+        for record in result.get(record_type, []):
+            if isinstance(record, dict):
+                disclosure = _disclosure_from_record(record, record_type[:-1], None)
+                if disclosure is not None:
+                    disclosures.append(disclosure)
+
+    return disclosures
+
+
+def _disclosure_from_record(
+    record: dict[str, Any],
+    record_type: str,
+    project: dict[str, Any] | None,
+) -> Disclosure | None:
+    project_id = project.get("id") if project is not None else record.get("project_id")
+    record_id = record.get("id")
+    if project_id is None:
+        return None
+    return Disclosure(
+        project_id=int(project_id),
+        record_type=record_type,
+        record_id=int(record_id) if record_id is not None else None,
+        decision="allowed",
+        reason="project_visible",
     )
