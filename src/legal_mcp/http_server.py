@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -45,12 +46,19 @@ class LegalMCPHTTPRequestHandler(BaseHTTPRequestHandler):
         if self.path != "/mcp":
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
             return
-        access_context = self._resolve_access_context()
-        if access_context is None:
-            self._send_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
-            return
         if not self._origin_allowed():
             self._send_json(HTTPStatus.FORBIDDEN, {"error": "origin_not_allowed"})
+            return
+        try:
+            access_context = self._resolve_access_context()
+        except sqlite3.Error:
+            self._send_json(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"error": "auth_unavailable"},
+            )
+            return
+        if access_context is None:
+            self._send_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
             return
 
         try:
