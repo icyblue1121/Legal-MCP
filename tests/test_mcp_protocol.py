@@ -59,16 +59,14 @@ def test_handle_tools_list_returns_legal_mcp_tools(tmp_path: Path) -> None:
     )
 
     names = [tool["name"] for tool in response["result"]["tools"]]
-    assert names == [
-        "list_projects",
-        "get_project_context",
-        "list_expiring_licenses",
-        "list_open_risks",
-    ]
-    get_project_context = next(
-        tool for tool in response["result"]["tools"] if tool["name"] == "get_project_context"
+    assert "resolve_project" in names
+    assert "get_project_fields" in names
+    assert "list_project_contracts" in names
+    assert "get_project_context" not in names
+    get_project_fields = next(
+        tool for tool in response["result"]["tools"] if tool["name"] == "get_project_fields"
     )
-    fields_schema = get_project_context["inputSchema"]["properties"]["fields"]
+    fields_schema = get_project_fields["inputSchema"]["properties"]["fields"]
     assert fields_schema["type"] == "array"
     assert "website" in fields_schema["items"]["enum"]
 

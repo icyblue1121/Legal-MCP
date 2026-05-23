@@ -8,7 +8,8 @@ from typing import Any
 
 from legal_mcp import __version__
 from legal_mcp.policy import AccessContext
-from legal_mcp.tools import TOOL_DEFINITIONS, call_tool
+from legal_mcp.tool_catalog import tool_definitions
+from legal_mcp.tools import call_tool
 
 PROTOCOL_VERSION = "2024-11-05"
 
@@ -36,7 +37,11 @@ def handle_message(
             },
         }
     if method == "tools/list":
-        return {"jsonrpc": "2.0", "id": request_id, "result": {"tools": TOOL_DEFINITIONS}}
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {"tools": tool_definitions()},
+        }
     if method == "tools/call":
         params = message.get("params") or {}
         result = call_tool(
