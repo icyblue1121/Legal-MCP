@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 from legal_mcp import db
+from legal_mcp.agent_observability import build_trace_metadata, langfuse_callbacks
 from legal_mcp.agent_router import clarify_result, route_question, validate_agent_decision
 from legal_mcp.audit import DEFAULT_AUDIT_PATH
 from legal_mcp.policy import AccessContext
@@ -93,10 +94,16 @@ def _run_graph(
             start=START,
             end=END,
         )
-        return graph.invoke(
-            {"question": question},
-            {"configurable": {"thread_id": thread_id}},
-        )
+        config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
+        callbacks = langfuse_callbacks()
+        if callbacks:
+            config["callbacks"] = callbacks
+            config["metadata"] = build_trace_metadata(
+                thread_id=thread_id,
+                tool_name=None,
+                status="started",
+            )
+        return graph.invoke({"question": question}, config)
     finally:
         checkpoint_conn.close()
 
