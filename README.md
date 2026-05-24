@@ -88,6 +88,22 @@ project name.
 Both stdio and HTTP transports run startup checks for schema compatibility.
 Remote update checks are optional and never block startup.
 
+### v1.4 Service-Side Agent Entry
+
+Legal-MCP v1.4 adds `agent_query` as the preferred client entry point. Clients
+send a natural-language question; the server-side LangGraph workflow selects and
+executes approved internal tools, preserving minimum disclosure and audit
+records.
+
+Set `LEGAL_MCP_AGENT_PUBLIC_ONLY=true` or pass `--agent-public-only` to
+`legal-mcp serve` or `legal-mcp serve-http` when clients should see only
+`agent_query` in `tools/list`. Configure the agent with `OPENAI_API_KEY`,
+optional `OPENAI_BASE_URL`, and optional `LEGAL_MCP_AGENT_MODEL`.
+
+For tracing, use self-hosted Langfuse only. `LANGFUSE_PUBLIC_KEY`,
+`LANGFUSE_SECRET_KEY`, and `LANGFUSE_BASE_URL=http://127.0.0.1:3000` enable
+local callbacks; Langfuse Cloud is not the production default.
+
 ## MCP Client Configuration
 
 Run `legal-mcp setup --client CLIENT` to write a local stdio MCP server config.
