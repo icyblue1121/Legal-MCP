@@ -55,6 +55,20 @@ Run the stdio MCP server directly:
 legal-mcp serve
 ```
 
+### v1.3 Minimum Disclosure
+
+Legal-MCP v1.3 is a breaking security upgrade. Full project-context queries are
+not allowed by default. Clients must use fine-grained tools, request explicit
+fields, or call the planner entry point so Legal-MCP can choose the minimum
+necessary fields.
+
+`get_project_context` is deprecated and no longer returns complete project,
+license, contract, and risk context. Use `tools/list` to inspect the tool
+catalog and select a fine-grained tool.
+
+Both stdio and HTTP transports run startup checks for schema compatibility.
+Remote update checks are optional and never block startup.
+
 ## MCP Client Configuration
 
 Run `legal-mcp setup --client CLIENT` to write a local stdio MCP server config.
@@ -116,6 +130,45 @@ legal-mcp setup \
 
 claude mcp list
 ```
+
+### v1.2 Named User Tokens
+
+The v1.1 shared-token HTTP setup remains available for small trusted pilots. For
+v1.2 enterprise permissions, bootstrap an admin user and run the Admin Web UI:
+
+```sh
+legal-mcp admin create-user \
+  --email admin@example.com \
+  --display-name "Admin User" \
+  --role admin \
+  --password "replace-with-a-long-random-password" \
+  --db /data/legal.db
+
+legal-mcp serve-admin \
+  --host 127.0.0.1 \
+  --port 8766 \
+  --db /data/legal.db
+```
+
+The Admin Web UI creates `legal`, `business`, and `auditor` users, issues
+per-user API keys, and grants project access for users who need scoped project
+visibility.
+
+For v1.2 clients, use each user's Admin-generated API key as the MCP proxy
+token:
+
+```sh
+export LEGAL_MCP_API_KEY="lmcp_replace_with_the_user_api_key"
+
+legal-mcp setup \
+  --client codex \
+  --remote-url http://legal-mcp.internal:8765/mcp \
+  --token "$LEGAL_MCP_API_KEY"
+```
+
+Keep the Admin Web UI on `127.0.0.1` and manage it through an SSH tunnel, or
+put it behind a TLS reverse proxy before binding it to a network interface. The
+Admin UI handles passwords, session cookies, and one-time API key display.
 
 Keep deployment notes that contain hostnames, client paths, tokens, or real data
 in local documents outside Git.

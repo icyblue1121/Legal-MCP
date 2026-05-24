@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from legal_mcp.import_pipeline import import_file
 
 DEFAULT_DATABASE_PATH = Path.home() / ".legal-mcp" / "legal.db"
 SETUP_CLIENTS = ("claude", "claude-code", "cursor", "windsurf", "vscode", "codex", "generic")
+ADMIN_ROLES = ("admin", "legal", "business", "auditor")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -45,6 +47,10 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_AUDIT_PATH,
         help="Audit log JSONL path",
     )
+    serve_parser.add_argument(
+        "--update-check-url",
+        help="Optional JSON endpoint for non-blocking startup update notices.",
+    )
     serve_http_parser = subparsers.add_parser("serve-http", help="Run the HTTP MCP server")
     serve_http_parser.add_argument("--host", default="127.0.0.1")
     serve_http_parser.add_argument("--port", type=int, default=8765)
@@ -62,11 +68,37 @@ def build_parser() -> argparse.ArgumentParser:
     )
     serve_http_parser.add_argument("--token", required=True, help="Bearer token required by clients")
     serve_http_parser.add_argument(
+        "--update-check-url",
+        help="Optional JSON endpoint for non-blocking startup update notices.",
+    )
+    serve_http_parser.add_argument(
         "--allow-origin",
         dest="allowed_origins",
         action="append",
         default=[],
         help="Allowed browser Origin. Repeat for multiple origins.",
+    )
+    serve_admin_parser = subparsers.add_parser("serve-admin", help="Run the admin web server")
+    serve_admin_parser.add_argument("--host", default="127.0.0.1")
+    serve_admin_parser.add_argument("--port", type=int, default=8766)
+    serve_admin_parser.add_argument(
+        "--db",
+        type=Path,
+        default=DEFAULT_DATABASE_PATH,
+        help=f"SQLite database path (default: {DEFAULT_DATABASE_PATH})",
+    )
+    admin_parser = subparsers.add_parser("admin", help="Admin bootstrap commands")
+    admin_subparsers = admin_parser.add_subparsers(dest="admin_command", required=True)
+    create_user_parser = admin_subparsers.add_parser("create-user", help="Create a local user")
+    create_user_parser.add_argument("--email", required=True)
+    create_user_parser.add_argument("--display-name", required=True)
+    create_user_parser.add_argument("--role", choices=ADMIN_ROLES, required=True)
+    create_user_parser.add_argument("--password")
+    create_user_parser.add_argument(
+        "--db",
+        type=Path,
+        default=DEFAULT_DATABASE_PATH,
+        help=f"SQLite database path (default: {DEFAULT_DATABASE_PATH})",
     )
     proxy_parser = subparsers.add_parser("proxy", help="Proxy local stdio MCP to a remote HTTP MCP server")
     proxy_parser.add_argument("--url", required=True, help="Remote HTTP MCP endpoint URL")
@@ -121,7 +153,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "serve":
         from legal_mcp.mcp_server import serve
 
-        serve(args.db, args.audit_log, sys.stdin.buffer, sys.stdout.buffer, sys.stderr)
+        serve(
+            args.db,
+            args.audit_log,
+            sys.stdin.buffer,
+            sys.stdout.buffer,
+            sys.stderr,
+            update_check_url=args.update_check_url,
+        )
         return 0
     if args.command == "serve-http":
         from legal_mcp.http_server import serve_http
@@ -133,7 +172,43 @@ def main(argv: list[str] | None = None) -> int:
             audit_path=args.audit_log,
             bearer_token=args.token,
             allowed_origins=tuple(args.allowed_origins),
+            update_check_url=args.update_check_url,
         )
+        return 0
+    if args.command == "serve-admin":
+        from legal_mcp.admin_server import build_admin_server
+
+        server = build_admin_server(host=args.host, port=args.port, database_path=args.db)
+        try:
+            server.serve_forever()
+        finally:
+            server.server_close()
+        return 0
+    if args.command == "admin" and args.admin_command == "create-user":
+        from legal_mcp import db
+        from legal_mcp.identity import create_user, hash_password
+
+        if args.role == "admin" and not args.password:
+            print("Error: --password is required when creating an admin user", file=sys.stderr)
+            return 2
+
+        db.initialize_database(args.db)
+        conn = db.connect(args.db)
+        try:
+            try:
+                create_user(
+                    conn,
+                    email=args.email,
+                    display_name=args.display_name,
+                    role=args.role,
+                    password_hash=hash_password(args.password) if args.password else None,
+                )
+            except sqlite3.IntegrityError:
+                print(f"Error: user already exists: {args.email}", file=sys.stderr)
+                return 1
+        finally:
+            conn.close()
+        print(f"Created user {args.email} ({args.role})")
         return 0
     if args.command == "proxy":
         from legal_mcp.proxy import proxy_stdio

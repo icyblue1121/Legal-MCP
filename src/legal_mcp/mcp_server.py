@@ -11,18 +11,27 @@ from typing import BinaryIO, TextIO
 from legal_mcp.audit import DEFAULT_AUDIT_PATH
 from legal_mcp.cli import DEFAULT_DATABASE_PATH
 from legal_mcp.mcp_protocol import handle_message
+from legal_mcp.startup import require_startup_checks
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="legal-mcp serve")
     parser.add_argument("--db", type=Path, default=DEFAULT_DATABASE_PATH)
     parser.add_argument("--audit-log", type=Path, default=DEFAULT_AUDIT_PATH)
+    parser.add_argument("--update-check-url")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    serve(args.db, args.audit_log, sys.stdin.buffer, sys.stdout.buffer, sys.stderr)
+    serve(
+        args.db,
+        args.audit_log,
+        sys.stdin.buffer,
+        sys.stdout.buffer,
+        sys.stderr,
+        update_check_url=args.update_check_url,
+    )
     return 0
 
 
@@ -32,7 +41,10 @@ def serve(
     stdin: BinaryIO,
     stdout: BinaryIO,
     stderr: TextIO,
+    *,
+    update_check_url: str | None = None,
 ) -> None:
+    require_startup_checks(database_path, remote_url=update_check_url)
     framing: str | None = None
     while True:
         read_result = _read_message(stdin, framing)

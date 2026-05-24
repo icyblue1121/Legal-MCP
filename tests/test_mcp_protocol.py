@@ -4,7 +4,9 @@ import json
 from pathlib import Path
 
 from legal_mcp import db
+from legal_mcp.identity import ROLE_BUSINESS, create_user
 from legal_mcp.mcp_protocol import handle_message
+from legal_mcp.policy import AccessContext
 
 
 def _database_with_project(path: Path) -> None:
@@ -57,12 +59,16 @@ def test_handle_tools_list_returns_legal_mcp_tools(tmp_path: Path) -> None:
     )
 
     names = [tool["name"] for tool in response["result"]["tools"]]
-    assert names == [
-        "list_projects",
-        "get_project_context",
-        "list_expiring_licenses",
-        "list_open_risks",
-    ]
+    assert "resolve_project" in names
+    assert "get_project_fields" in names
+    assert "list_project_contracts" in names
+    assert "get_project_context" not in names
+    get_project_fields = next(
+        tool for tool in response["result"]["tools"] if tool["name"] == "get_project_fields"
+    )
+    fields_schema = get_project_fields["inputSchema"]["properties"]["fields"]
+    assert fields_schema["type"] == "array"
+    assert "website" in fields_schema["items"]["enum"]
 
 
 def test_handle_tool_call_returns_json_text_content(tmp_path: Path) -> None:
@@ -74,14 +80,15 @@ def test_handle_tool_call_returns_json_text_content(tmp_path: Path) -> None:
         {
             "jsonrpc": "2.0",
             "id": 3,
-            "method": "tools/call",
-            "params": {
-                "name": "get_project_context",
-                "arguments": {
-                    "project_id_or_name": "Mgame",
-                    "rationale": "team deployment smoke test",
-                    "source_client": "pytest",
-                },
+                "method": "tools/call",
+                "params": {
+                    "name": "get_project_fields",
+                    "arguments": {
+                        "project_id_or_name": "Mgame",
+                        "fields": ["contact_person"],
+                        "rationale": "team deployment smoke test",
+                        "source_client": "pytest",
+                    },
             },
         },
         database_path=database_path,
@@ -94,6 +101,46 @@ def test_handle_tool_call_returns_json_text_content(tmp_path: Path) -> None:
     assert response["result"]["isError"] is False
     assert payload["project"]["contact_person"] == "沪小胖"
     assert audit_path.exists()
+
+
+def test_handle_tool_call_uses_access_context_to_hide_ungranted_project(tmp_path: Path) -> None:
+    database_path = tmp_path / "legal.db"
+    audit_path = tmp_path / "audit.jsonl"
+    _database_with_project(database_path)
+    conn = db.connect(database_path)
+    try:
+        business_user = create_user(
+            conn,
+            email="business@example.com",
+            display_name="Business User",
+            role=ROLE_BUSINESS,
+        )
+    finally:
+        conn.close()
+
+    response = handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 4,
+                "method": "tools/call",
+                "params": {
+                    "name": "get_project_fields",
+                    "arguments": {
+                        "project_id_or_name": "Mgame",
+                        "fields": ["contact_person"],
+                        "rationale": "team deployment smoke test",
+                        "source_client": "pytest",
+                    },
+            },
+        },
+        database_path=database_path,
+        audit_path=audit_path,
+        access_context=AccessContext.from_user(business_user),
+    )
+
+    payload = json.loads(response["result"]["content"][0]["text"])
+    assert response["result"]["isError"] is True
+    assert payload["error"]["code"] == "not_found"
 
 
 def test_handle_notification_returns_none(tmp_path: Path) -> None:

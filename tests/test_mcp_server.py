@@ -65,9 +65,10 @@ def test_stdio_server_lists_tools_and_calls_get_project_context(tmp_path) -> Non
                     "id": 3,
                     "method": "tools/call",
                     "params": {
-                        "name": "get_project_context",
+                        "name": "get_project_fields",
                         "arguments": {
                             "project_id_or_name": "GAME-001",
+                            "fields": ["project_code"],
                             "rationale": "contract review",
                         },
                     },
@@ -94,12 +95,11 @@ def test_stdio_server_lists_tools_and_calls_get_project_context(tmp_path) -> Non
 
     responses = decode_messages(process.stdout)
     tools_response = next(response for response in responses if response.get("id") == 2)
-    assert {tool["name"] for tool in tools_response["result"]["tools"]} == {
-        "list_projects",
-        "get_project_context",
-        "list_expiring_licenses",
-        "list_open_risks",
-    }
+    tool_names = {tool["name"] for tool in tools_response["result"]["tools"]}
+    assert "resolve_project" in tool_names
+    assert "get_project_fields" in tool_names
+    assert "list_project_contracts" in tool_names
+    assert "get_project_context" not in tool_names
 
     call_response = next(response for response in responses if response.get("id") == 3)
     content = json.loads(call_response["result"]["content"][0]["text"])
@@ -150,9 +150,8 @@ def test_stdio_server_supports_jsonl_framing(tmp_path) -> None:
     responses = decode_jsonl_messages(process.stdout)
     assert responses[0]["result"]["serverInfo"]["name"] == "legal-mcp"
     tools_response = next(response for response in responses if response.get("id") == 2)
-    assert {tool["name"] for tool in tools_response["result"]["tools"]} == {
-        "list_projects",
-        "get_project_context",
-        "list_expiring_licenses",
-        "list_open_risks",
-    }
+    tool_names = {tool["name"] for tool in tools_response["result"]["tools"]}
+    assert "resolve_project" in tool_names
+    assert "get_project_fields" in tool_names
+    assert "list_project_contracts" in tool_names
+    assert "get_project_context" not in tool_names

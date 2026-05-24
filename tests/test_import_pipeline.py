@@ -184,6 +184,46 @@ def test_child_rows_with_unknown_project_code_fail_validation(tmp_path) -> None:
     assert report.errors[0].error_code == "unknown_project"
 
 
+def test_contract_import_uses_project_alias_before_exact_match(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        project_id = conn.execute(
+            "insert into projects (project_code, name, stage) values (?, ?, ?)",
+            ("MGAME", "MGame", "live"),
+        ).lastrowid
+        conn.execute(
+            "insert into project_aliases (project_id, alias, source) values (?, ?, ?)",
+            (project_id, "MGAME项目部", "pytest"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    csv_path = tmp_path / "contract_info.csv"
+    csv_path.write_text(
+        "\ufeff,项目代号,经办人,收付款条件,,合同概览,币种,总金额,过期时间,签约时间,对方签约公司,我方签约公司,合同主题,合同号,收入或支出,\n"
+        "2025-12-13 00:30:19,MGAME项目部,侯宇洋,开票后60天支付,,直播KOL采购,人民币,11690,2026-10-31,2025-11-01,福建超神网络科技有限公司,上海游碧曜网络科技有限公司,【框架+执行单-Mgame-达人合作】Mgame12月测试发行直播KOL采购-超神,SHYBYBZ2025000082,我方支出,\n",
+        encoding="utf-8",
+    )
+
+    report = import_file(csv_path, database_path=database_path)
+
+    assert report.errors == []
+    conn = db.connect(database_path)
+    try:
+        row = conn.execute(
+            "select * from contracts where external_key = ?",
+            ("SHYBYBZ2025000082",),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row["project_id"] == project_id
+    assert row["title"] == "【框架+执行单-Mgame-达人合作】Mgame12月测试发行直播KOL采购-超神"
+    assert row["total_amount"] == "11690"
+
+
 def test_ledger_xlsx_fans_out_and_reimport_is_idempotent(tmp_path) -> None:
     source = tmp_path / "project_ledger.xlsx"
     database_path = tmp_path / "legal.db"
