@@ -118,6 +118,8 @@ def call_tool(
                     disclosures,
                     record_type="license",
                 )
+            elif tool_name == "agent_query":
+                result = _error("agent_unavailable", "agent runtime is not configured")
             elif tool_name == "get_project_context":
                 result = _error(
                     "deprecated_tool",
