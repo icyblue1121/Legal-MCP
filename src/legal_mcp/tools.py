@@ -119,7 +119,20 @@ def call_tool(
                     record_type="license",
                 )
             elif tool_name == "agent_query":
-                result = _error("agent_unavailable", "agent runtime is not configured")
+                question = arguments.get("question")
+                if not isinstance(question, str) or not question.strip():
+                    result = _error("validation_error", "question is required")
+                else:
+                    from legal_mcp.agent_graph import run_agent_query
+
+                    thread_id = arguments.get("thread_id")
+                    result = run_agent_query(
+                        question=question,
+                        database_path=database_path,
+                        audit_path=audit_path,
+                        access_context=access_context,
+                        thread_id=thread_id if isinstance(thread_id, str) else None,
+                    )
             elif tool_name == "get_project_context":
                 result = _error(
                     "deprecated_tool",

@@ -128,6 +128,15 @@ EXPECTED_COLUMNS = {
         "decision",
         "reason",
     ],
+    "agent_runs": [
+        "id",
+        "thread_id",
+        "question_summary",
+        "status",
+        "selected_tool",
+        "error_code",
+        "created_at",
+    ],
 }
 
 EXPECTED_INDEXES = [
@@ -154,6 +163,7 @@ EXPECTED_INDEXES = [
     ("audit_events", ("tool_name",), False),
     ("audit_disclosures", ("audit_event_id",), False),
     ("audit_disclosures", ("project_id",), False),
+    ("agent_runs", ("thread_id",), False),
 ]
 
 
@@ -178,7 +188,7 @@ def test_initialize_database_records_schema_version(tmp_path) -> None:
     finally:
         conn.close()
 
-    assert row["version"] == 13
+    assert row["version"] == 14
 
 
 def test_initialize_database_creates_group_permission_and_alias_tables(tmp_path) -> None:
