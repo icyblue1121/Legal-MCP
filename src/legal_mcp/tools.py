@@ -95,13 +95,29 @@ def call_tool(
             elif tool_name == "get_project_fields":
                 result = get_project_fields(conn, arguments, access_context)
                 _append_project_field_disclosures(conn, arguments, result, disclosures)
+                _append_project_denied_field_disclosures(conn, arguments, result, disclosures)
             elif tool_name == "get_contract_fields":
                 result = get_contract_fields(conn, arguments, access_context)
                 _append_contract_field_disclosures(conn, arguments, result, disclosures)
+                _append_contract_denied_field_disclosures(conn, arguments, result, disclosures)
             elif tool_name == "list_project_contracts":
                 result = list_project_contracts(conn, arguments, access_context)
+                _append_project_child_denied_field_disclosures(
+                    conn,
+                    arguments,
+                    result,
+                    disclosures,
+                    record_type="contract",
+                )
             elif tool_name == "list_project_licenses":
                 result = list_project_licenses(conn, arguments, access_context)
+                _append_project_child_denied_field_disclosures(
+                    conn,
+                    arguments,
+                    result,
+                    disclosures,
+                    record_type="license",
+                )
             elif tool_name == "get_project_context":
                 result = _error(
                     "deprecated_tool",
@@ -488,3 +504,115 @@ def _append_contract_field_disclosures(
     )
     disclosures.append(base)
     disclosures.extend(_field_disclosures(base, contract, {"contract_number", "title"}))
+
+
+def _append_project_denied_field_disclosures(
+    conn: sqlite3.Connection,
+    arguments: dict[str, Any],
+    result: dict[str, Any],
+    disclosures: list[Disclosure],
+) -> None:
+    denied_fields = _denied_fields_from_result(result)
+    query = arguments.get("project_id_or_name")
+    if not denied_fields or not isinstance(query, str):
+        return
+    lookup = lookup_project(conn, query)
+    if lookup.kind != ProjectLookupResult.FOUND or not lookup.project:
+        return
+    project_id = int(lookup.project["id"])
+    disclosures.extend(
+        _denied_field_disclosures(
+            project_id=project_id,
+            record_type="project",
+            record_id=project_id,
+            denied_fields=denied_fields,
+        )
+    )
+
+
+def _append_contract_denied_field_disclosures(
+    conn: sqlite3.Connection,
+    arguments: dict[str, Any],
+    result: dict[str, Any],
+    disclosures: list[Disclosure],
+) -> None:
+    denied_fields = _denied_fields_from_result(result)
+    contract_number = arguments.get("contract_number")
+    if not denied_fields or not isinstance(contract_number, str):
+        return
+    row = conn.execute(
+        "select id, project_id from contracts where contract_number = ? or external_key = ?",
+        (contract_number, contract_number),
+    ).fetchone()
+    if row is None:
+        return
+    disclosures.extend(
+        _denied_field_disclosures(
+            project_id=int(row["project_id"]),
+            record_type="contract",
+            record_id=int(row["id"]),
+            denied_fields=denied_fields,
+        )
+    )
+
+
+def _append_project_child_denied_field_disclosures(
+    conn: sqlite3.Connection,
+    arguments: dict[str, Any],
+    result: dict[str, Any],
+    disclosures: list[Disclosure],
+    *,
+    record_type: str,
+) -> None:
+    denied_fields = _denied_fields_from_result(result)
+    query = arguments.get("project_id_or_name")
+    if not denied_fields or not isinstance(query, str):
+        return
+    lookup = lookup_project(conn, query)
+    if lookup.kind != ProjectLookupResult.FOUND or not lookup.project:
+        return
+    disclosures.extend(
+        _denied_field_disclosures(
+            project_id=int(lookup.project["id"]),
+            record_type=record_type,
+            record_id=None,
+            denied_fields=denied_fields,
+        )
+    )
+
+
+def _denied_fields_from_result(result: dict[str, Any]) -> dict[str, str]:
+    error = result.get("error")
+    if not isinstance(error, dict) or error.get("code") != "field_access_denied":
+        return {}
+    details = error.get("details")
+    if not isinstance(details, dict):
+        return {}
+    denied_fields = details.get("denied_fields")
+    if not isinstance(denied_fields, dict):
+        return {}
+    return {
+        str(field): str(reason)
+        for field, reason in denied_fields.items()
+        if isinstance(field, str)
+    }
+
+
+def _denied_field_disclosures(
+    *,
+    project_id: int,
+    record_type: str,
+    record_id: int | None,
+    denied_fields: dict[str, str],
+) -> list[Disclosure]:
+    return [
+        Disclosure(
+            project_id=project_id,
+            record_type=record_type,
+            record_id=record_id,
+            field_name=field_name,
+            decision="denied",
+            reason=reason,
+        )
+        for field_name, reason in sorted(denied_fields.items())
+    ]

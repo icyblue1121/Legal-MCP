@@ -126,6 +126,63 @@ def test_write_audit_event_persists_disclosure_without_record_id(
     assert disclosure["record_id"] is None
 
 
+def test_write_audit_event_persists_denied_field_disclosure(
+    conn: sqlite3.Connection,
+) -> None:
+    user = create_user(
+        conn,
+        email="business@example.com",
+        display_name="Business User",
+        role=ROLE_BUSINESS,
+    )
+    project_id = _project(conn, "GAME-001")
+    context = AccessContext.from_user(user)
+
+    event_id = write_audit_event(
+        conn,
+        context=context,
+        tool_name="get_project_fields",
+        rationale="query project notes",
+        source_client="pytest",
+        arguments={"project_id_or_name": "GAME-001", "fields": ["notes"]},
+        result={
+            "error": {
+                "code": "field_access_denied",
+                "message": "one or more requested fields are not granted",
+                "candidates": [],
+                "details": {"denied_fields": {"notes": "field_not_granted"}},
+            }
+        },
+        disclosures=[
+            Disclosure(
+                project_id=project_id,
+                record_type="project",
+                record_id=project_id,
+                field_name="notes",
+                decision="denied",
+                reason="field_not_granted",
+            )
+        ],
+    )
+
+    disclosure = conn.execute(
+        """
+        select project_id, record_type, record_id, field_name, decision, reason
+        from audit_disclosures
+        where audit_event_id = ?
+        """,
+        (event_id,),
+    ).fetchone()
+    assert dict(disclosure) == {
+        "project_id": project_id,
+        "record_type": "project",
+        "record_id": project_id,
+        "field_name": "notes",
+        "decision": "denied",
+        "reason": "field_not_granted",
+    }
+
+
 def test_write_audit_event_persists_without_context(
     conn: sqlite3.Connection,
 ) -> None:

@@ -145,6 +145,99 @@ def test_project_field_query_records_allowed_field_disclosure(tmp_path) -> None:
     ]
 
 
+def test_denied_project_field_query_records_denied_field_disclosure(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    audit_path = tmp_path / "audit.jsonl"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        project_id = conn.execute(
+            """
+            insert into projects (project_code, name, stage, website, notes)
+            values (?, ?, ?, ?, ?)
+            """,
+            ("MGAME", "MGame", "live", "https://mgame.example", "Sensitive notes"),
+        ).lastrowid
+        business_user = create_user(
+            conn,
+            email="business@example.com",
+            display_name="Business User",
+            role=ROLE_BUSINESS,
+        )
+        legal_user = create_user(
+            conn,
+            email="legal@example.com",
+            display_name="Legal User",
+            role=ROLE_LEGAL,
+        )
+        conn.execute(
+            """
+            insert into project_access (user_id, project_id, granted_by_user_id)
+            values (?, ?, ?)
+            """,
+            (business_user["id"], project_id, legal_user["id"]),
+        )
+        group_id = conn.execute(
+            "insert into user_groups (name) values (?)",
+            ("business-project-website",),
+        ).lastrowid
+        conn.execute(
+            "insert into user_group_memberships (user_id, group_id) values (?, ?)",
+            (business_user["id"], group_id),
+        )
+        conn.execute(
+            """
+            insert into permission_grants
+              (group_id, operation, data_domain, field_name, project_id)
+            values (?, ?, ?, ?, ?)
+            """,
+            (group_id, "read", "project", "website", project_id),
+        )
+        conn.commit()
+        context = AccessContext.from_user(business_user)
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "get_project_fields",
+        {
+            "project_id_or_name": "MGAME",
+            "fields": ["website", "notes"],
+            "rationale": "query website and notes",
+        },
+        database_path=database_path,
+        audit_path=audit_path,
+        access_context=context,
+    )
+
+    conn = db.connect(database_path)
+    try:
+        event = conn.execute("select * from audit_events").fetchone()
+        disclosures = conn.execute(
+            """
+            select project_id, record_type, record_id, field_name, decision, reason
+            from audit_disclosures
+            order by field_name
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+
+    assert result["error"]["code"] == "field_access_denied"
+    assert event["result_status"] == "error"
+    assert event["error_code"] == "field_access_denied"
+    assert [dict(row) for row in disclosures] == [
+        {
+            "project_id": project_id,
+            "record_type": "project",
+            "record_id": project_id,
+            "field_name": "notes",
+            "decision": "denied",
+            "reason": "field_not_granted",
+        }
+    ]
+
+
 def test_hidden_project_lookup_records_denied_disclosure_without_leaking_project(
     tmp_path,
 ) -> None:
