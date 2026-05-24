@@ -11,7 +11,7 @@ from pathlib import Path
 from legal_mcp import __version__, db
 from legal_mcp.db import DatabasePath
 
-EXPECTED_SCHEMA_VERSION = 13
+EXPECTED_SCHEMA_VERSION = 14
 
 
 @dataclass(frozen=True)

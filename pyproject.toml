@@ -13,6 +13,14 @@ authors = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+agent = [
+  "langgraph>=1.0",
+  "langgraph-checkpoint-sqlite>=3.0.1",
+  "langchain-openai>=1.2",
+  "langfuse>=3",
+]
+
 [project.scripts]
 legal-mcp = "legal_mcp.cli:main"
 

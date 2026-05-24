@@ -23,3 +23,21 @@ def test_team_deployment_docs_describe_v13_minimum_disclosure() -> None:
     assert "minimum disclosure" in content
     assert "get_project_context" in content
     assert "startup checks" in content
+
+
+def test_docs_describe_v14_agent_observability_runbook() -> None:
+    readme = Path("README.md").read_text(encoding="utf-8")
+    deployment = Path("Docs/team-deployment.md").read_text(encoding="utf-8")
+    observability = Path("Docs/agent-observability.md").read_text(encoding="utf-8")
+    combined = "\n".join([readme, deployment, observability])
+
+    assert "agent_query" in combined
+    assert "LEGAL_MCP_AGENT_MODEL" in combined
+    assert "OPENAI_BASE_URL" in combined
+    assert "LANGFUSE_PUBLIC_KEY" in combined
+    assert "LANGFUSE_BASE_URL=http://127.0.0.1:3000" in combined
+    assert "LEGAL_MCP_AGENT_PUBLIC_ONLY" in combined
+    assert "Langfuse Cloud is not the production default" in combined
+    assert "self-hosted Langfuse" in combined
+    assert "Langflow is prototype-only" in combined
+    assert "must not be connected to production Legal-MCP data" in combined

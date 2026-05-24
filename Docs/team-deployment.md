@@ -172,6 +172,44 @@ previously depended on `get_project_context` need to request explicit fields or
 use the planner. This minimum disclosure model prevents default full project,
 license, contract, and risk context responses.
 
+## v1.4 Agent Entry
+
+v1.4 adds `agent_query` as the preferred public AI entry point. The server uses
+LangGraph to route natural-language questions through the same permissioned
+internal tools, so field grants, disclosure audit rows, and minimum disclosure
+still apply.
+
+To expose only the agent entry point to team clients:
+
+```sh
+export LEGAL_MCP_AGENT_PUBLIC_ONLY=true
+
+legal-mcp serve-http \
+  --host 0.0.0.0 \
+  --port 8765 \
+  --db /data/legal.db \
+  --audit-log /data/audit.jsonl \
+  --token "$LEGAL_MCP_API_KEY" \
+  --agent-public-only
+```
+
+Configure model access with `OPENAI_API_KEY`, optional `OPENAI_BASE_URL`, and
+optional `LEGAL_MCP_AGENT_MODEL`. Keep these values in operator-managed secrets,
+not in Git.
+
+Production observability must use self-hosted Langfuse on localhost, a private
+Docker network, or an intranet host. For a host-local test deployment:
+
+```sh
+export LANGFUSE_PUBLIC_KEY="pk-lf-local"
+export LANGFUSE_SECRET_KEY="sk-lf-local"
+export LANGFUSE_BASE_URL=http://127.0.0.1:3000
+```
+
+Langfuse Cloud is not the production default. Langflow is prototype-only and
+must not be connected to production Legal-MCP data without network/auth
+isolation.
+
 ## Smoke test
 
 Ask the AI client:

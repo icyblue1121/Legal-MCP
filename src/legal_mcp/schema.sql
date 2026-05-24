@@ -5,7 +5,7 @@ create table if not exists schema_version (
 );
 
 insert into schema_version (id, version)
-values (1, 13)
+values (1, 14)
 on conflict(id) do update set
   version = excluded.version,
   updated_at = datetime('now');
@@ -183,6 +183,16 @@ create table if not exists audit_disclosures (
   reason text not null
 );
 
+create table if not exists agent_runs (
+  id integer primary key,
+  thread_id text not null,
+  question_summary text not null,
+  status text not null check (status in ('success', 'error')),
+  selected_tool text,
+  error_code text,
+  created_at text not null default (datetime('now'))
+);
+
 create index if not exists idx_projects_stage on projects(stage);
 create index if not exists idx_projects_name on projects(name);
 create index if not exists idx_licenses_license_type on licenses(license_type);
@@ -202,3 +212,4 @@ create index if not exists idx_audit_events_user_id on audit_events(user_id);
 create index if not exists idx_audit_events_tool_name on audit_events(tool_name);
 create index if not exists idx_audit_disclosures_audit_event_id on audit_disclosures(audit_event_id);
 create index if not exists idx_audit_disclosures_project_id on audit_disclosures(project_id);
+create index if not exists idx_agent_runs_thread_id on agent_runs(thread_id);

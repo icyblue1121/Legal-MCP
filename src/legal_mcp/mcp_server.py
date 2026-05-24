@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from typing import BinaryIO, TextIO
 
+from legal_mcp.agent_config import load_agent_config
 from legal_mcp.audit import DEFAULT_AUDIT_PATH
 from legal_mcp.cli import DEFAULT_DATABASE_PATH
 from legal_mcp.mcp_protocol import handle_message
@@ -19,6 +20,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--db", type=Path, default=DEFAULT_DATABASE_PATH)
     parser.add_argument("--audit-log", type=Path, default=DEFAULT_AUDIT_PATH)
     parser.add_argument("--update-check-url")
+    parser.add_argument(
+        "--agent-public-only",
+        action="store_true",
+        help="Expose only the agent_query tool in tools/list.",
+    )
     return parser
 
 
@@ -31,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.buffer,
         sys.stderr,
         update_check_url=args.update_check_url,
+        public_agent_only=True if args.agent_public_only else None,
     )
     return 0
 
@@ -43,15 +50,26 @@ def serve(
     stderr: TextIO,
     *,
     update_check_url: str | None = None,
+    public_agent_only: bool | None = None,
 ) -> None:
     require_startup_checks(database_path, remote_url=update_check_url)
+    resolved_public_agent_only = (
+        load_agent_config().public_agent_only
+        if public_agent_only is None
+        else public_agent_only
+    )
     framing: str | None = None
     while True:
         read_result = _read_message(stdin, framing)
         if read_result is None:
             return
         message, framing = read_result
-        response = handle_message(message, database_path=database_path, audit_path=audit_path)
+        response = handle_message(
+            message,
+            database_path=database_path,
+            audit_path=audit_path,
+            public_agent_only=resolved_public_agent_only,
+        )
         if response is not None:
             _write_message(stdout, response, framing)
             stdout.flush()

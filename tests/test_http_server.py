@@ -137,6 +137,22 @@ def test_http_mcp_accepts_named_user_api_key_for_granted_project(tmp_path: Path)
             """,
             (business_user["id"], project_id, grantor["id"]),
         )
+        group_id = conn.execute(
+            "insert into user_groups (name) values (?)",
+            ("business-project-code",),
+        ).lastrowid
+        conn.execute(
+            "insert into user_group_memberships (user_id, group_id) values (?, ?)",
+            (business_user["id"], group_id),
+        )
+        conn.execute(
+            """
+            insert into permission_grants
+              (group_id, operation, data_domain, field_name, project_id)
+            values (?, ?, ?, ?, ?)
+            """,
+            (group_id, "read", "project", "project_code", project_id),
+        )
         conn.commit()
         api_key = create_api_key(conn, user_id=business_user["id"], label="pytest")
     finally:
@@ -394,3 +410,36 @@ def test_http_mcp_allows_absent_origin_for_non_browser_clients(http_service) -> 
     assert "resolve_project" in tool_names
     assert "get_project_fields" in tool_names
     assert "get_project_context" not in tool_names
+
+
+def test_http_mcp_can_expose_only_agent_query_with_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = tmp_path / "legal.db"
+    audit_path = tmp_path / "audit.jsonl"
+    _database_with_project(database_path)
+    monkeypatch.setenv("LEGAL_MCP_AGENT_PUBLIC_ONLY", "true")
+    server = build_http_server(
+        host="127.0.0.1",
+        port=0,
+        database_path=database_path,
+        audit_path=audit_path,
+        bearer_token="secret-token",
+        allowed_origins=("http://legal.internal",),
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, payload = _post_json(
+            f"http://127.0.0.1:{server.server_port}/mcp",
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+            origin="http://legal.internal",
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+    assert status == 200
+    assert [tool["name"] for tool in payload["result"]["tools"]] == ["agent_query"]

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from legal_mcp import db
+from legal_mcp.agent_config import load_agent_config
 from legal_mcp.identity import verify_api_key
 from legal_mcp.mcp_protocol import handle_message
 from legal_mcp.policy import AccessContext
@@ -26,12 +27,18 @@ class LegalMCPHTTPServer(ThreadingHTTPServer):
         audit_path: str | Path,
         bearer_token: str,
         allowed_origins: tuple[str, ...],
+        public_agent_only: bool | None = None,
     ) -> None:
         super().__init__(server_address, RequestHandlerClass)
         self.database_path = Path(database_path)
         self.audit_path = Path(audit_path)
         self.bearer_token = bearer_token
         self.allowed_origins = allowed_origins
+        self.public_agent_only = (
+            load_agent_config().public_agent_only
+            if public_agent_only is None
+            else public_agent_only
+        )
 
 
 class LegalMCPHTTPRequestHandler(BaseHTTPRequestHandler):
@@ -75,6 +82,7 @@ class LegalMCPHTTPRequestHandler(BaseHTTPRequestHandler):
             database_path=self.server.database_path,
             audit_path=self.server.audit_path,
             access_context=access_context,
+            public_agent_only=self.server.public_agent_only,
         )
         if response is None:
             self._send_json(HTTPStatus.ACCEPTED, {})
@@ -140,6 +148,7 @@ def build_http_server(
     audit_path: str | Path,
     bearer_token: str,
     allowed_origins: tuple[str, ...],
+    public_agent_only: bool | None = None,
 ) -> LegalMCPHTTPServer:
     if not bearer_token:
         raise ValueError("bearer token is required")
@@ -150,6 +159,7 @@ def build_http_server(
         audit_path=audit_path,
         bearer_token=bearer_token,
         allowed_origins=allowed_origins,
+        public_agent_only=public_agent_only,
     )
 
 
@@ -162,6 +172,7 @@ def serve_http(
     bearer_token: str,
     allowed_origins: tuple[str, ...],
     update_check_url: str | None = None,
+    public_agent_only: bool | None = None,
 ) -> None:
     require_startup_checks(database_path, remote_url=update_check_url)
     server = build_http_server(
@@ -171,6 +182,7 @@ def serve_http(
         audit_path=audit_path,
         bearer_token=bearer_token,
         allowed_origins=allowed_origins,
+        public_agent_only=public_agent_only,
     )
     try:
         server.serve_forever()

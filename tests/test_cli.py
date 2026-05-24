@@ -37,6 +37,14 @@ def test_serve_parses_update_check_url() -> None:
     assert args.update_check_url == "https://updates.example/legal-mcp.json"
 
 
+def test_serve_parses_agent_public_only() -> None:
+    parser = main.__globals__["build_parser"]()
+
+    args = parser.parse_args(["serve", "--agent-public-only"])
+
+    assert args.agent_public_only is True
+
+
 def test_cli_accepts_serve_http_options() -> None:
     parser = main.__globals__["build_parser"]()
 
@@ -59,6 +67,14 @@ def test_cli_accepts_serve_http_options() -> None:
     assert args.port == 8765
     assert args.token == "secret-token"
     assert args.allowed_origins == ["http://legal.internal"]
+
+
+def test_serve_http_parses_agent_public_only() -> None:
+    parser = main.__globals__["build_parser"]()
+
+    args = parser.parse_args(["serve-http", "--token", "secret", "--agent-public-only"])
+
+    assert args.agent_public_only is True
 
 
 def test_serve_http_parses_update_check_url() -> None:

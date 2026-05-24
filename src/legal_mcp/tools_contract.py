@@ -6,7 +6,7 @@ import sqlite3
 from typing import Any
 
 from legal_mcp.lookup import ProjectLookupResult, lookup_project
-from legal_mcp.policy import AccessContext, project_is_visible
+from legal_mcp.policy import AccessContext, authorize_fields, project_is_visible
 from legal_mcp.tool_catalog import CONTRACT_FIELDS
 
 CONTRACT_IDENTITY_FIELDS = ("contract_number", "title")
@@ -40,6 +40,16 @@ def list_project_contracts(
     project_id = int(project["id"])
     if not project_is_visible(conn, access_context, project_id):
         return _permission_error("project")
+    decision = authorize_fields(
+        conn,
+        access_context,
+        operation="read",
+        data_domain="contract",
+        project_id=project_id,
+        requested_fields=requested - set(CONTRACT_IDENTITY_FIELDS),
+    )
+    if decision.denied_fields:
+        return _field_access_error(decision.denied_fields)
 
     rows = conn.execute(
         """
@@ -67,7 +77,7 @@ def list_project_contracts(
         (project_id, limit),
     ).fetchall()
 
-    projected = [*CONTRACT_IDENTITY_FIELDS, *sorted(requested)]
+    projected = [*CONTRACT_IDENTITY_FIELDS, *sorted(decision.allowed_fields)]
     return {
         "contracts": [
             {
@@ -120,10 +130,21 @@ def get_contract_fields(
     ).fetchone()
     if row is None:
         return _error("not_found", "contract not found")
-    if not project_is_visible(conn, access_context, int(row["project_id"])):
+    project_id = int(row["project_id"])
+    if not project_is_visible(conn, access_context, project_id):
         return _permission_error("contract")
+    decision = authorize_fields(
+        conn,
+        access_context,
+        operation="read",
+        data_domain="contract",
+        project_id=project_id,
+        requested_fields=requested - set(CONTRACT_IDENTITY_FIELDS),
+    )
+    if decision.denied_fields:
+        return _field_access_error(decision.denied_fields)
 
-    projected = [*CONTRACT_IDENTITY_FIELDS, *sorted(requested)]
+    projected = [*CONTRACT_IDENTITY_FIELDS, *sorted(decision.allowed_fields)]
     return {
         "contract": {
             field: row[field]
@@ -143,3 +164,14 @@ def _permission_error(record_type: str) -> dict[str, Any]:
         "access_denied",
         f"权限不足，当前用户没有访问{target}的权限。请联系管理员开通项目访问权限。",
     )
+
+
+def _field_access_error(denied_fields: dict[str, str]) -> dict[str, Any]:
+    return {
+        "error": {
+            "code": "field_access_denied",
+            "message": "one or more requested fields are not granted",
+            "candidates": [],
+            "details": {"denied_fields": dict(sorted(denied_fields.items()))},
+        }
+    }
