@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 PROJECT_FIELDS = (
     "project_code",
@@ -47,19 +47,26 @@ LICENSE_FIELDS = (
     "notes",
 )
 
+ToolOperation = Literal["read", "propose_write", "write", "admin"]
+ToolSideEffect = Literal["none", "proposal", "write", "admin"]
+
 
 @dataclass(frozen=True)
 class ToolCapability:
     name: str
     description: str
     data_domain: str
-    operation: str
+    operation: ToolOperation
     filters: tuple[str, ...]
     return_fields: tuple[str, ...]
     requires_project_scope: bool
     result_kind: str
     default_limit: int | None = None
     max_limit: int | None = None
+    side_effect: ToolSideEffect = "none"
+    agent_allowed: bool = True
+    requires_fields: bool = False
+    requires_human_approval: bool = False
 
 
 CATALOG: dict[str, ToolCapability] = {
@@ -108,6 +115,7 @@ CATALOG: dict[str, ToolCapability] = {
         return_fields=PROJECT_FIELDS,
         requires_project_scope=True,
         result_kind="single",
+        requires_fields=True,
     ),
     "list_project_contracts": ToolCapability(
         name="list_project_contracts",
@@ -120,6 +128,7 @@ CATALOG: dict[str, ToolCapability] = {
         result_kind="list",
         default_limit=20,
         max_limit=100,
+        requires_fields=True,
     ),
     "list_project_licenses": ToolCapability(
         name="list_project_licenses",
@@ -132,6 +141,7 @@ CATALOG: dict[str, ToolCapability] = {
         result_kind="list",
         default_limit=20,
         max_limit=100,
+        requires_fields=True,
     ),
     "get_contract_fields": ToolCapability(
         name="get_contract_fields",
@@ -142,12 +152,61 @@ CATALOG: dict[str, ToolCapability] = {
         return_fields=CONTRACT_FIELDS,
         requires_project_scope=True,
         result_kind="single",
+        requires_fields=True,
+    ),
+    "agent_query": ToolCapability(
+        name="agent_query",
+        description="Ask the service-side Legal-MCP agent a legal project question.",
+        data_domain="agent",
+        operation="read",
+        filters=("question", "thread_id"),
+        return_fields=("answer", "thread_id", "tool_calls", "status"),
+        requires_project_scope=False,
+        result_kind="single",
+        side_effect="none",
+        agent_allowed=False,
+    ),
+    "propose_project_update": ToolCapability(
+        name="propose_project_update",
+        description="Draft a project update proposal for human review; does not write data.",
+        data_domain="project",
+        operation="propose_write",
+        filters=("project_id_or_name", "changes"),
+        return_fields=("proposal_id", "diff", "requires_approval"),
+        requires_project_scope=True,
+        result_kind="single",
+        side_effect="proposal",
+        agent_allowed=False,
+        requires_human_approval=True,
     ),
 }
 
 
-def tool_definitions() -> list[dict[str, Any]]:
-    return [_tool_definition(capability) for capability in CATALOG.values()]
+def capability_by_name(name: str) -> ToolCapability:
+    return CATALOG[name]
+
+
+def agent_capabilities() -> list[ToolCapability]:
+    return [
+        capability
+        for capability in CATALOG.values()
+        if capability.agent_allowed
+        and capability.operation == "read"
+        and capability.side_effect == "none"
+    ]
+
+
+def tool_definitions(*, public_agent_only: bool = False) -> list[dict[str, Any]]:
+    capabilities = (
+        [CATALOG["agent_query"]]
+        if public_agent_only
+        else [
+            capability
+            for capability in CATALOG.values()
+            if capability.name != "propose_project_update"
+        ]
+    )
+    return [_tool_definition(capability) for capability in capabilities]
 
 
 def _tool_definition(capability: ToolCapability) -> dict[str, Any]:
@@ -169,6 +228,8 @@ def _tool_definition(capability: ToolCapability) -> dict[str, Any]:
                 "default": capability.default_limit,
                 "maximum": capability.max_limit,
             }
+        elif filter_name == "thread_id":
+            properties[filter_name] = {"type": "string"}
         else:
             properties[filter_name] = {"type": "string"}
             required.append(filter_name)
@@ -189,5 +250,9 @@ def _tool_definition(capability: ToolCapability) -> dict[str, Any]:
             "result_kind": capability.result_kind,
             "default_limit": capability.default_limit,
             "max_limit": capability.max_limit,
+            "side_effect": capability.side_effect,
+            "agent_allowed": capability.agent_allowed,
+            "requires_fields": capability.requires_fields,
+            "requires_human_approval": capability.requires_human_approval,
         },
     }

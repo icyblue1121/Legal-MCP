@@ -73,6 +73,19 @@ def test_handle_tools_list_returns_legal_mcp_tools(tmp_path: Path) -> None:
     assert "website" in fields_schema["items"]["enum"]
 
 
+def test_handle_tools_list_can_expose_only_agent_query(tmp_path: Path) -> None:
+    response = handle_message(
+        {"jsonrpc": "2.0", "id": 22, "method": "tools/list", "params": {}},
+        database_path=tmp_path / "legal.db",
+        audit_path=tmp_path / "audit.jsonl",
+        public_agent_only=True,
+    )
+
+    tools = response["result"]["tools"]
+    assert [tool["name"] for tool in tools] == ["agent_query"]
+    assert tools[0]["inputSchema"]["required"] == ["rationale", "question"]
+
+
 def test_handle_tool_call_returns_json_text_content(tmp_path: Path) -> None:
     database_path = tmp_path / "legal.db"
     audit_path = tmp_path / "audit.jsonl"
