@@ -32,6 +32,21 @@ CONTRACT_FIELDS = (
     "summary",
 )
 
+LICENSE_FIELDS = (
+    "license_type",
+    "identifier",
+    "entity_name",
+    "issuer",
+    "approval_number",
+    "rights_holder",
+    "copyright_holder",
+    "operating_entity",
+    "actual_operator",
+    "authorization_relation",
+    "expiry_date",
+    "notes",
+)
+
 
 @dataclass(frozen=True)
 class ToolCapability:
@@ -60,13 +75,29 @@ CATALOG: dict[str, ToolCapability] = {
     ),
     "resolve_project": ToolCapability(
         name="resolve_project",
-        description="Resolve a project by code, name, or alias.",
+        description=(
+            "Resolve a project by code, name, or alias. Do not use for user "
+            "permissions; use describe_my_access for permission questions."
+        ),
         data_domain="project",
         operation="read",
         filters=("query",),
         return_fields=("project_code", "name"),
         requires_project_scope=False,
         result_kind="single_or_candidates",
+    ),
+    "describe_my_access": ToolCapability(
+        name="describe_my_access",
+        description=(
+            "Query the current user's permissions: visible projects, accessible "
+            "project codes, and fields the user can read."
+        ),
+        data_domain="access",
+        operation="read",
+        filters=(),
+        return_fields=("projects", "fields"),
+        requires_project_scope=False,
+        result_kind="list",
     ),
     "get_project_fields": ToolCapability(
         name="get_project_fields",
@@ -85,6 +116,18 @@ CATALOG: dict[str, ToolCapability] = {
         operation="read",
         filters=("project_id_or_name", "fields", "limit"),
         return_fields=CONTRACT_FIELDS,
+        requires_project_scope=True,
+        result_kind="list",
+        default_limit=20,
+        max_limit=100,
+    ),
+    "list_project_licenses": ToolCapability(
+        name="list_project_licenses",
+        description="List licenses for a project with selected license fields.",
+        data_domain="license",
+        operation="read",
+        filters=("project_id_or_name", "fields", "limit"),
+        return_fields=LICENSE_FIELDS,
         requires_project_scope=True,
         result_kind="list",
         default_limit=20,

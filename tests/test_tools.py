@@ -47,6 +47,33 @@ def grant_project_access(conn, *, user_id: int, project_id: int) -> None:
     conn.commit()
 
 
+def grant_field_access(
+    conn,
+    *,
+    user_id: int,
+    project_id: int,
+    data_domain: str,
+    field_name: str,
+) -> None:
+    group_id = conn.execute(
+        "insert into user_groups (name) values (?)",
+        (f"group-{user_id}-{project_id}-{data_domain}-{field_name}",),
+    ).lastrowid
+    conn.execute(
+        "insert into user_group_memberships (user_id, group_id) values (?, ?)",
+        (user_id, group_id),
+    )
+    conn.execute(
+        """
+        insert into permission_grants
+          (group_id, operation, data_domain, field_name, project_id)
+        values (?, ?, ?, ?, ?)
+        """,
+        (group_id, "read", data_domain, field_name, project_id),
+    )
+    conn.commit()
+
+
 def test_all_tools_require_rationale(tmp_path) -> None:
     database_path = tmp_path / "legal.db"
     db.initialize_database(database_path)
@@ -60,6 +87,99 @@ def test_all_tools_require_rationale(tmp_path) -> None:
         result = call_tool(tool_name, arguments, database_path=database_path)
 
         assert result["error"]["code"] == "missing_rationale"
+
+
+def test_describe_my_access_returns_visible_projects_and_granted_fields(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        visible_project_id = seed_project(conn, code="GAME-001", name="Visible Project")
+        seed_project(conn, code="GAME-002", name="Hidden Project")
+        legal_user = create_user(
+            conn,
+            email="legal@example.com",
+            display_name="Legal User",
+            role=ROLE_LEGAL,
+        )
+        grant_project_access(conn, user_id=legal_user["id"], project_id=visible_project_id)
+        grant_field_access(
+            conn,
+            user_id=legal_user["id"],
+            project_id=visible_project_id,
+            data_domain="project",
+            field_name="website",
+        )
+        grant_field_access(
+            conn,
+            user_id=legal_user["id"],
+            project_id=visible_project_id,
+            data_domain="contract",
+            field_name="total_amount",
+        )
+        grant_field_access(
+            conn,
+            user_id=legal_user["id"],
+            project_id=visible_project_id,
+            data_domain="license",
+            field_name="actual_operator",
+        )
+        context = AccessContext.from_user(legal_user)
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "describe_my_access",
+        {"rationale": "confirm accessible project scope"},
+        database_path=database_path,
+        access_context=context,
+    )
+
+    assert result["access"]["projects"] == [
+        {
+            "project_code": "GAME-001",
+            "name": "Visible Project",
+            "fields": {
+                "project": ["website"],
+                "contract": ["total_amount"],
+                "license": ["actual_operator"],
+            },
+        }
+    ]
+    assert "GAME-002" not in str(result)
+
+
+def test_project_not_found_error_includes_visible_access_summary(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        visible_project_id = seed_project(conn, code="GAME-001", name="Visible Project")
+        legal_user = create_user(
+            conn,
+            email="legal@example.com",
+            display_name="Legal User",
+            role=ROLE_LEGAL,
+        )
+        grant_project_access(conn, user_id=legal_user["id"], project_id=visible_project_id)
+        context = AccessContext.from_user(legal_user)
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "get_project_fields",
+        {
+            "project_id_or_name": "MISSING",
+            "fields": ["website"],
+            "rationale": "query project website",
+        },
+        database_path=database_path,
+        access_context=context,
+    )
+
+    assert result["error"]["code"] == "not_found"
+    assert "当前用户可见项目" in result["error"]["message"]
+    assert result["error"]["details"]["access"]["projects"][0]["project_code"] == "GAME-001"
 
 
 def test_get_project_fields_includes_requested_project_fields(tmp_path) -> None:
@@ -91,12 +211,15 @@ def test_get_project_fields_includes_requested_project_fields(tmp_path) -> None:
         database_path=database_path,
     )
 
-    assert result["project"]["project_code"] == "GAME-001"
-    assert result["project"]["legal_bp"] == "Ava"
-    assert result["project"]["department"] == "Publishing"
-    assert result["project"]["release_team"] == "Release A"
-    assert result["project"]["contact_person"] == "Morgan"
-    assert result["project"]["website"] == "https://example.test"
+    assert result == {
+        "project": {
+            "legal_bp": "Ava",
+            "department": "Publishing",
+            "release_team": "Release A",
+            "contact_person": "Morgan",
+            "website": "https://example.test",
+        }
+    }
 
 
 def test_resolve_project_returns_identity_fields(
@@ -125,6 +248,34 @@ def test_resolve_project_returns_identity_fields(
             "name": "MGame",
         }
     }
+
+
+def test_resolve_project_delegates_user_permission_questions_to_access_summary(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        project_id = seed_project(conn, code="GAME-001", name="Visible Project")
+        legal_user = create_user(
+            conn,
+            email="legal@example.com",
+            display_name="Legal User",
+            role=ROLE_LEGAL,
+        )
+        grant_project_access(conn, user_id=legal_user["id"], project_id=project_id)
+        context = AccessContext.from_user(legal_user)
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "resolve_project",
+        {"query": "查询用户权限", "rationale": "check user permissions"},
+        database_path=database_path,
+        access_context=context,
+    )
+
+    assert "access" in result
+    assert result["access"]["projects"][0]["project_code"] == "GAME-001"
 
 
 def test_get_project_fields_requires_fields(tmp_path) -> None:
@@ -166,8 +317,6 @@ def test_get_project_fields_returns_only_requested_fields(tmp_path) -> None:
 
     assert result == {
         "project": {
-            "project_code": "MGAME",
-            "name": "MGame",
             "website": "https://example.test",
         }
     }
@@ -234,6 +383,184 @@ def test_get_contract_fields_returns_only_requested_amount(tmp_path) -> None:
             "currency": "人民币",
             "total_amount": "11690",
         }
+    }
+
+
+def test_list_project_contracts_returns_visible_project_contracts(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        project_id = seed_project(conn, code="MGAME", name="MGame")
+        conn.executemany(
+            """
+            insert into contracts (
+              project_id, external_key, title, contract_number, total_amount, currency
+            )
+            values (?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    project_id,
+                    "SHYBYBZ2025000082",
+                    "MGame KOL Contract",
+                    "SHYBYBZ2025000082",
+                    "11690",
+                    "人民币",
+                ),
+                (
+                    project_id,
+                    "SHYBYBZ2025000081",
+                    "MGame Creator Contract",
+                    "SHYBYBZ2025000081",
+                    "7000",
+                    "人民币",
+                ),
+            ],
+        )
+        legal_user = create_user(
+            conn,
+            email="legal@example.com",
+            display_name="Legal User",
+            role=ROLE_LEGAL,
+        )
+        grant_project_access(conn, user_id=legal_user["id"], project_id=project_id)
+        context = AccessContext.from_user(legal_user)
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "list_project_contracts",
+        {
+            "project_id_or_name": "MGAME",
+            "fields": ["total_amount", "currency"],
+            "rationale": "query project contracts",
+        },
+        database_path=database_path,
+        access_context=context,
+    )
+
+    assert result == {
+        "contracts": [
+            {
+                "contract_number": "SHYBYBZ2025000081",
+                "title": "MGame Creator Contract",
+                "currency": "人民币",
+                "total_amount": "7000",
+            },
+            {
+                "contract_number": "SHYBYBZ2025000082",
+                "title": "MGame KOL Contract",
+                "currency": "人民币",
+                "total_amount": "11690",
+            },
+        ]
+    }
+
+
+def test_list_project_contracts_returns_access_denied_without_access(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        project_id = seed_project(conn, code="MGAME", name="MGame")
+        conn.execute(
+            """
+            insert into contracts (
+              project_id, external_key, title, contract_number, total_amount
+            )
+            values (?, ?, ?, ?, ?)
+            """,
+            (
+                project_id,
+                "SHYBYBZ2025000082",
+                "MGame KOL Contract",
+                "SHYBYBZ2025000082",
+                "11690",
+            ),
+        )
+        legal_user = create_user(
+            conn,
+            email="legal@example.com",
+            display_name="Legal User",
+            role=ROLE_LEGAL,
+        )
+        context = AccessContext.from_user(legal_user)
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "list_project_contracts",
+        {
+            "project_id_or_name": "MGAME",
+            "fields": ["total_amount"],
+            "rationale": "query project contracts",
+        },
+        database_path=database_path,
+        access_context=context,
+    )
+
+    assert result["error"]["code"] == "access_denied"
+    assert "联系管理员" in result["error"]["message"]
+
+
+def test_legal_user_can_list_project_license_operator_fields_by_project_code(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        project_id = seed_project(conn, code="T", name="Project T")
+        conn.execute(
+            """
+            insert into licenses (
+              project_id, external_key, license_type, identifier,
+              operating_entity, actual_operator
+            )
+            values (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                project_id,
+                "publication_license",
+                "publication_license",
+                "ISBN-T",
+                "版号运营主体 T",
+                "实际运营主体 T",
+            ),
+        )
+        legal_user = create_user(
+            conn,
+            email="legal@example.com",
+            display_name="Legal User",
+            role=ROLE_LEGAL,
+        )
+        grant_project_access(conn, user_id=legal_user["id"], project_id=project_id)
+        context = AccessContext.from_user(legal_user)
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "list_project_licenses",
+        {
+            "project_id_or_name": "T",
+            "fields": ["actual_operator", "operating_entity"],
+            "rationale": "query project operator",
+        },
+        database_path=database_path,
+        access_context=context,
+    )
+
+    assert result == {
+        "licenses": [
+            {
+                "license_type": "publication_license",
+                "identifier": "ISBN-T",
+                "actual_operator": "实际运营主体 T",
+                "operating_entity": "版号运营主体 T",
+            }
+        ]
     }
 
 
@@ -457,7 +784,7 @@ def test_list_projects_filters_to_business_project_access_grants(tmp_path) -> No
     assert [project["project_code"] for project in result["projects"]] == ["GAME-001"]
 
 
-def test_get_project_fields_returns_not_found_for_hidden_project(tmp_path) -> None:
+def test_get_project_fields_returns_access_denied_for_hidden_project(tmp_path) -> None:
     database_path = tmp_path / "legal.db"
     db.initialize_database(database_path)
     conn = db.connect(database_path)
@@ -485,7 +812,8 @@ def test_get_project_fields_returns_not_found_for_hidden_project(tmp_path) -> No
         access_context=context,
     )
 
-    assert result["error"]["code"] == "not_found"
+    assert result["error"]["code"] == "access_denied"
+    assert "联系管理员" in result["error"]["message"]
 
 
 def test_get_project_fields_returns_not_found_when_name_is_ambiguous(
@@ -624,7 +952,7 @@ def test_legal_user_list_projects_filters_to_project_access_grants(tmp_path) -> 
     assert [project["project_code"] for project in result["projects"]] == ["GAME-001"]
 
 
-def test_legal_user_get_project_fields_returns_not_found_for_hidden_project(tmp_path) -> None:
+def test_legal_user_get_project_fields_returns_access_denied_for_hidden_project(tmp_path) -> None:
     database_path = tmp_path / "legal.db"
     db.initialize_database(database_path)
     conn = db.connect(database_path)
@@ -653,7 +981,8 @@ def test_legal_user_get_project_fields_returns_not_found_for_hidden_project(tmp_
         access_context=context,
     )
 
-    assert result["error"]["code"] == "not_found"
+    assert result["error"]["code"] == "access_denied"
+    assert "联系管理员" in result["error"]["message"]
 
 
 def test_auditor_cannot_call_content_tools(tmp_path) -> None:

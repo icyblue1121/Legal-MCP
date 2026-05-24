@@ -66,6 +66,25 @@ necessary fields.
 license, contract, and risk context. Use `tools/list` to inspect the tool
 catalog and select a fine-grained tool.
 
+The v1.3 query tools include:
+
+- `describe_my_access` for the current user's visible projects and readable
+  fields. This is the right tool for questions like "我能访问哪些项目？" or
+  "查询用户权限".
+- `get_project_fields` for one or more explicit project fields. Responses only
+  include requested fields and do not automatically include project identity
+  fields.
+- `list_project_contracts` and `list_project_licenses` for scoped project
+  contract and license fields.
+
+Project lookup accepts project codes, project names, aliases, and user questions
+that contain a single project identifier. When a project is not found, project
+queries include the current user's visible project and field summary under
+`error.details.access` so users can distinguish missing data from missing access.
+If an MCP client mistakenly sends a user-permission question to `resolve_project`,
+Legal-MCP returns the access summary instead of treating the question as a
+project name.
+
 Both stdio and HTTP transports run startup checks for schema compatibility.
 Remote update checks are optional and never block startup.
 
@@ -87,6 +106,26 @@ Common client conventions:
 
 Supported setup clients are `claude`, `claude-code`, `cursor`, `windsurf`,
 `vscode`, `codex`, and `generic`.
+
+For local development, point client config at the checkout instead of a globally
+installed `legal-mcp` binary so newly added tools are visible immediately after
+restarting the MCP client. For Codex, `~/.codex/config.toml` can use:
+
+```toml
+[mcp_servers."legal-mcp"]
+command = "uv"
+args = [
+  "--directory",
+  "/Users/haoran/workspace/Legal-MCP",
+  "run",
+  "legal-mcp",
+  "serve",
+  "--db",
+  "/Users/haoran/.legal-mcp/legal.db",
+  "--audit-log",
+  "/Users/haoran/.legal-mcp/audit.jsonl",
+]
+```
 
 ## Team Deployment
 
