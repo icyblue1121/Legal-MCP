@@ -60,8 +60,10 @@ def test_handle_tools_list_returns_legal_mcp_tools(tmp_path: Path) -> None:
 
     names = [tool["name"] for tool in response["result"]["tools"]]
     assert "resolve_project" in names
+    assert "describe_my_access" in names
     assert "get_project_fields" in names
     assert "list_project_contracts" in names
+    assert "list_project_licenses" in names
     assert "get_project_context" not in names
     get_project_fields = next(
         tool for tool in response["result"]["tools"] if tool["name"] == "get_project_fields"
@@ -103,7 +105,7 @@ def test_handle_tool_call_returns_json_text_content(tmp_path: Path) -> None:
     assert audit_path.exists()
 
 
-def test_handle_tool_call_uses_access_context_to_hide_ungranted_project(tmp_path: Path) -> None:
+def test_handle_tool_call_returns_access_denied_for_ungranted_project(tmp_path: Path) -> None:
     database_path = tmp_path / "legal.db"
     audit_path = tmp_path / "audit.jsonl"
     _database_with_project(database_path)
@@ -140,7 +142,8 @@ def test_handle_tool_call_uses_access_context_to_hide_ungranted_project(tmp_path
 
     payload = json.loads(response["result"]["content"][0]["text"])
     assert response["result"]["isError"] is True
-    assert payload["error"]["code"] == "not_found"
+    assert payload["error"]["code"] == "access_denied"
+    assert "联系管理员" in payload["error"]["message"]
 
 
 def test_handle_notification_returns_none(tmp_path: Path) -> None:

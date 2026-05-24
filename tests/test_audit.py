@@ -359,7 +359,7 @@ def test_open_risks_hidden_project_code_records_denied_disclosure_without_leak(
     finally:
         conn.close()
 
-    assert result == {"risks": []}
+    assert result["error"]["code"] == "access_denied"
     assert disclosure["project_id"] == hidden_project_id
     assert disclosure["record_type"] == "project"
     assert disclosure["record_id"] == hidden_project_id

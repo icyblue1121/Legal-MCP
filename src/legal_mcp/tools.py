@@ -12,14 +12,16 @@ from legal_mcp import db
 from legal_mcp.audit import DEFAULT_AUDIT_PATH, write_audit_record
 from legal_mcp.disclosure_audit import Disclosure, write_audit_event
 from legal_mcp.lookup import ProjectLookupResult, lookup_project
-from legal_mcp.planner import plan_query
+from legal_mcp.planner import asks_for_access_scope, plan_query
 from legal_mcp.policy import (
     AccessContext,
     can_query_content,
     project_is_visible,
     visible_project_ids,
 )
-from legal_mcp.tools_contract import get_contract_fields
+from legal_mcp.tools_access import build_access_summary, describe_my_access
+from legal_mcp.tools_contract import get_contract_fields, list_project_contracts
+from legal_mcp.tools_license import list_project_licenses
 from legal_mcp.tools_project import get_project_fields, resolve_project
 
 
@@ -48,7 +50,7 @@ def call_tool(
         )
         return result
 
-    if not can_query_content(access_context):
+    if tool_name != "describe_my_access" and not can_query_content(access_context):
         result = _error("access_denied", "user is not allowed to query project content")
         _audit(tool_name, rationale, source_client, arguments, result, audit_path)
         _audit_database(
@@ -69,6 +71,8 @@ def call_tool(
         try:
             if tool_name == "list_projects":
                 result = _list_projects(conn, arguments, access_context)
+            elif tool_name == "describe_my_access":
+                result = describe_my_access(conn, arguments, access_context)
             elif tool_name == "plan_query":
                 question = arguments.get("question")
                 if not isinstance(question, str) or not question.strip():
@@ -83,13 +87,21 @@ def call_tool(
                         }
                     }
             elif tool_name == "resolve_project":
-                result = resolve_project(conn, arguments, access_context)
+                query = arguments.get("query")
+                if isinstance(query, str) and asks_for_access_scope(query):
+                    result = describe_my_access(conn, arguments, access_context)
+                else:
+                    result = resolve_project(conn, arguments, access_context)
             elif tool_name == "get_project_fields":
                 result = get_project_fields(conn, arguments, access_context)
                 _append_project_field_disclosures(conn, arguments, result, disclosures)
             elif tool_name == "get_contract_fields":
                 result = get_contract_fields(conn, arguments, access_context)
                 _append_contract_field_disclosures(conn, arguments, result, disclosures)
+            elif tool_name == "list_project_contracts":
+                result = list_project_contracts(conn, arguments, access_context)
+            elif tool_name == "list_project_licenses":
+                result = list_project_licenses(conn, arguments, access_context)
             elif tool_name == "get_project_context":
                 result = _error(
                     "deprecated_tool",
@@ -101,6 +113,7 @@ def call_tool(
                 result = _list_open_risks(conn, arguments, access_context, disclosures)
             else:
                 result = _error("validation_error", f"unknown tool: {tool_name}")
+            _append_access_summary_to_project_not_found(conn, result, access_context)
         finally:
             conn.close()
     except sqlite3.Error as exc:
@@ -119,6 +132,25 @@ def call_tool(
         disclosures,
     )
     return result
+
+
+def _append_access_summary_to_project_not_found(
+    conn: sqlite3.Connection,
+    result: dict[str, Any],
+    access_context: AccessContext | None,
+) -> None:
+    error = result.get("error")
+    if not isinstance(error, dict):
+        return
+    if error.get("code") != "not_found" or error.get("message") != "project not found":
+        return
+    error["message"] = (
+        "未找到项目。当前用户可见项目和字段已附在 details.access；"
+        "如果目标项目不在列表中，可能是权限未开通，也可能是资料库尚未收录。"
+    )
+    details = error.setdefault("details", {})
+    if isinstance(details, dict):
+        details["access"] = build_access_summary(conn, access_context)
 
 
 def _list_projects(
@@ -223,7 +255,10 @@ def _list_open_risks(
                     reason="project_hidden",
                 )
             )
-            return {"risks": []}
+            return _error(
+                "access_denied",
+                "权限不足，当前用户没有访问该项目的权限。请联系管理员开通项目访问权限。",
+            )
 
     if visible == set():
         return {"risks": []}

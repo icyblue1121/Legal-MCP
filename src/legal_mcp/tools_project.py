@@ -9,8 +9,6 @@ from legal_mcp.lookup import ProjectLookupResult, lookup_project
 from legal_mcp.policy import AccessContext, project_is_visible
 from legal_mcp.tool_catalog import PROJECT_FIELDS
 
-PROJECT_IDENTITY_FIELDS = ("project_code", "name")
-
 
 def get_project_fields(
     conn: sqlite3.Connection,
@@ -33,13 +31,12 @@ def get_project_fields(
     project = lookup.project or {}
     project_id = int(project["id"])
     if not project_is_visible(conn, access_context, project_id):
-        return _error("not_found", "project not found")
+        return _permission_error()
 
-    projected = [*PROJECT_IDENTITY_FIELDS, *sorted(requested)]
     return {
         "project": {
             field: project.get(field)
-            for field in projected
+            for field in sorted(requested)
             if field in project
         }
     }
@@ -58,7 +55,7 @@ def resolve_project(
         return _error("not_found", "project not found")
     project = lookup.project or {}
     if not project_is_visible(conn, access_context, int(project["id"])):
-        return _error("not_found", "project not found")
+        return _permission_error()
     return {
         "project": {
             "project_code": project["project_code"],
@@ -69,3 +66,10 @@ def resolve_project(
 
 def _error(code: str, message: str) -> dict[str, Any]:
     return {"error": {"code": code, "message": message, "candidates": [], "details": {}}}
+
+
+def _permission_error() -> dict[str, Any]:
+    return _error(
+        "access_denied",
+        "权限不足，当前用户没有访问该项目的权限。请联系管理员开通项目访问权限。",
+    )
