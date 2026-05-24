@@ -51,6 +51,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--update-check-url",
         help="Optional JSON endpoint for non-blocking startup update notices.",
     )
+    serve_parser.add_argument(
+        "--agent-public-only",
+        action="store_true",
+        help="Expose only agent_query in tools/list.",
+    )
     serve_http_parser = subparsers.add_parser("serve-http", help="Run the HTTP MCP server")
     serve_http_parser.add_argument("--host", default="127.0.0.1")
     serve_http_parser.add_argument("--port", type=int, default=8765)
@@ -77,6 +82,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help="Allowed browser Origin. Repeat for multiple origins.",
+    )
+    serve_http_parser.add_argument(
+        "--agent-public-only",
+        action="store_true",
+        help="Expose only agent_query in tools/list.",
     )
     serve_admin_parser = subparsers.add_parser("serve-admin", help="Run the admin web server")
     serve_admin_parser.add_argument("--host", default="127.0.0.1")
@@ -160,6 +170,7 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.buffer,
             sys.stderr,
             update_check_url=args.update_check_url,
+            public_agent_only=True if args.agent_public_only else None,
         )
         return 0
     if args.command == "serve-http":
@@ -173,6 +184,7 @@ def main(argv: list[str] | None = None) -> int:
             bearer_token=args.token,
             allowed_origins=tuple(args.allowed_origins),
             update_check_url=args.update_check_url,
+            public_agent_only=True if args.agent_public_only else None,
         )
         return 0
     if args.command == "serve-admin":

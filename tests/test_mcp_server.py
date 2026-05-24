@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 
@@ -155,3 +156,32 @@ def test_stdio_server_supports_jsonl_framing(tmp_path) -> None:
     assert "get_project_fields" in tool_names
     assert "list_project_contracts" in tool_names
     assert "get_project_context" not in tool_names
+
+
+def test_stdio_server_can_expose_only_agent_query_with_env(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    audit_path = tmp_path / "audit.jsonl"
+    db.initialize_database(database_path)
+    request_bytes = encode_message({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+    env = {**os.environ, "LEGAL_MCP_AGENT_PUBLIC_ONLY": "true"}
+
+    process = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "legal_mcp.mcp_server",
+            "--db",
+            str(database_path),
+            "--audit-log",
+            str(audit_path),
+        ],
+        input=request_bytes,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+        env=env,
+    )
+
+    responses = decode_messages(process.stdout)
+    tools_response = next(response for response in responses if response.get("id") == 2)
+    assert [tool["name"] for tool in tools_response["result"]["tools"]] == ["agent_query"]
