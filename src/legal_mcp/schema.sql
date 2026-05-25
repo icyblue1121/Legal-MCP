@@ -195,8 +195,16 @@ create table if not exists agent_runs (
 
 create index if not exists idx_projects_stage on projects(stage);
 create index if not exists idx_projects_name on projects(name);
+create index if not exists idx_projects_legal_bp on projects(legal_bp);
+create index if not exists idx_projects_department on projects(department);
+create index if not exists idx_projects_release_team on projects(release_team);
+create index if not exists idx_contracts_counterparty on contracts(counterparty);
+create index if not exists idx_contracts_handler on contracts(handler);
+create index if not exists idx_contracts_expiry_date on contracts(expiry_date);
 create index if not exists idx_licenses_license_type on licenses(license_type);
 create index if not exists idx_licenses_expiry_date on licenses(expiry_date);
+create index if not exists idx_licenses_actual_operator on licenses(actual_operator);
+create index if not exists idx_licenses_operating_entity on licenses(operating_entity);
 create index if not exists idx_risks_status on risks(status);
 create index if not exists idx_risks_project_status on risks(project_id, status);
 create index if not exists idx_users_external_subject on users(external_subject);
