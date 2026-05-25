@@ -166,6 +166,31 @@ CATALOG: dict[str, ToolCapability] = {
         side_effect="none",
         agent_allowed=False,
     ),
+    "agent_write": ToolCapability(
+        name="agent_write",
+        description="Draft a write proposal for human review; does not mutate data.",
+        data_domain="agent",
+        operation="propose_write",
+        filters=("instruction",),
+        return_fields=("proposal",),
+        requires_project_scope=False,
+        result_kind="single",
+        side_effect="proposal",
+        agent_allowed=False,
+        requires_human_approval=True,
+    ),
+    "structured_query": ToolCapability(
+        name="structured_query",
+        description="Run a constrained structured read query through the service-side graph.",
+        data_domain="agent",
+        operation="read",
+        filters=("query",),
+        return_fields=("answer", "result", "thread_id", "status"),
+        requires_project_scope=False,
+        result_kind="single",
+        side_effect="none",
+        agent_allowed=False,
+    ),
     "propose_project_update": ToolCapability(
         name="propose_project_update",
         description="Draft a project update proposal for human review; does not write data.",
@@ -196,16 +221,26 @@ def agent_capabilities() -> list[ToolCapability]:
     ]
 
 
-def tool_definitions(*, public_agent_only: bool = False) -> list[dict[str, Any]]:
-    capabilities = (
-        [CATALOG["agent_query"]]
-        if public_agent_only
-        else [
+def tool_definitions(
+    *,
+    public_agent_only: bool = False,
+    internal_debug: bool = False,
+) -> list[dict[str, Any]]:
+    if public_agent_only:
+        capabilities = [CATALOG["agent_query"]]
+    elif internal_debug:
+        capabilities = [
             capability
             for capability in CATALOG.values()
             if capability.name != "propose_project_update"
         ]
-    )
+    else:
+        capabilities = [
+            CATALOG["agent_query"],
+            CATALOG["agent_write"],
+            CATALOG["describe_my_access"],
+            CATALOG["structured_query"],
+        ]
     return [_tool_definition(capability) for capability in capabilities]
 
 
@@ -230,6 +265,9 @@ def _tool_definition(capability: ToolCapability) -> dict[str, Any]:
             }
         elif filter_name == "thread_id":
             properties[filter_name] = {"type": "string"}
+        elif filter_name == "query":
+            properties[filter_name] = {"type": "object"}
+            required.append(filter_name)
         else:
             properties[filter_name] = {"type": "string"}
             required.append(filter_name)

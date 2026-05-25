@@ -21,6 +21,7 @@ def handle_message(
     audit_path: str | Path,
     access_context: AccessContext | None = None,
     public_agent_only: bool = False,
+    internal_debug: bool = False,
 ) -> dict[str, Any] | None:
     request_id = message.get("id")
     method = message.get("method")
@@ -41,7 +42,12 @@ def handle_message(
         return {
             "jsonrpc": "2.0",
             "id": request_id,
-            "result": {"tools": tool_definitions(public_agent_only=public_agent_only)},
+            "result": {
+                "tools": tool_definitions(
+                    public_agent_only=public_agent_only,
+                    internal_debug=internal_debug,
+                )
+            },
         }
     if method == "tools/call":
         params = message.get("params") or {}
