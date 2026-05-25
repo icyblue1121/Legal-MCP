@@ -10,6 +10,7 @@ from legal_mcp import db
 from legal_mcp.agent_observability import build_trace_metadata, langfuse_callbacks
 from legal_mcp.agent_router import clarify_result, route_question, validate_agent_decision
 from legal_mcp.audit import DEFAULT_AUDIT_PATH
+from legal_mcp.ai_provider import AIMessage, AIProvider
 from legal_mcp.policy import AccessContext
 
 
@@ -20,6 +21,7 @@ class AgentState(TypedDict, total=False):
     answer: str
     error: dict[str, Any]
     tool_calls: list[dict[str, Any]]
+    model_intent: dict[str, Any]
 
 
 def run_agent_query(
@@ -30,6 +32,7 @@ def run_agent_query(
     audit_path: str | Path = DEFAULT_AUDIT_PATH,
     access_context: AccessContext | None = None,
     thread_id: str | None = None,
+    ai_provider: AIProvider | None = None,
 ) -> dict[str, Any]:
     actual_thread_id = thread_id or str(uuid.uuid4())
     actual_checkpoint_path = (
@@ -42,6 +45,7 @@ def run_agent_query(
         access_context=access_context,
         checkpoint_path=actual_checkpoint_path,
         thread_id=actual_thread_id,
+        ai_provider=ai_provider,
     )
     result: dict[str, Any] = {
         "answer": state.get("answer", ""),
@@ -67,6 +71,7 @@ def _run_graph(
     access_context: AccessContext | None,
     checkpoint_path: Path,
     thread_id: str,
+    ai_provider: AIProvider | None = None,
 ) -> AgentState:
     try:
         from langgraph.checkpoint.sqlite import SqliteSaver
@@ -79,6 +84,7 @@ def _run_graph(
             access_context=access_context,
             checkpoint_path=checkpoint_path,
             thread_id=thread_id,
+            ai_provider=ai_provider,
         )
 
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
@@ -93,6 +99,7 @@ def _run_graph(
             state_graph_cls=StateGraph,
             start=START,
             end=END,
+            ai_provider=ai_provider,
         )
         config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
         callbacks = langfuse_callbacks()
@@ -122,11 +129,12 @@ def _build_langgraph(
     state_graph_cls: Any,
     start: str,
     end: str,
+    ai_provider: AIProvider | None = None,
 ) -> Any:
     workflow = state_graph_cls(AgentState)
     workflow.add_node(
         "route",
-        lambda state: _route_node(state),
+        lambda state: _route_node(state, ai_provider),
     )
     workflow.add_node(
         "execute_tool",
@@ -148,6 +156,7 @@ def _run_linear_graph(
     access_context: AccessContext | None,
     checkpoint_path: Path,
     thread_id: str,
+    ai_provider: AIProvider | None = None,
 ) -> AgentState:
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     checkpoint_conn = sqlite3.connect(checkpoint_path)
@@ -164,7 +173,7 @@ def _run_linear_graph(
         )
         state: AgentState = {"question": question}
         for node_name, update in (
-            ("route", _route_node(state)),
+            ("route", _route_node(state, ai_provider)),
             ("execute_tool", {}),
             ("answer", {}),
         ):
@@ -186,18 +195,47 @@ def _run_linear_graph(
         checkpoint_conn.close()
 
 
-def _route_node(state: AgentState) -> dict[str, Any]:
+def _route_node(
+    state: AgentState,
+    ai_provider: AIProvider | None = None,
+) -> dict[str, Any]:
+    model_intent = _model_intent(state["question"], ai_provider)
     decision = route_question(state["question"])
     validation = validate_agent_decision(decision)
     if "error" in validation and decision.tool_name != "clarify_query":
         return {"error": validation["error"]}
-    return {
+    update: dict[str, Any] = {
         "decision": {
             "tool_name": decision.tool_name,
             "arguments": decision.arguments,
             "reason": decision.reason,
         }
     }
+    if model_intent:
+        update["model_intent"] = model_intent
+    return update
+
+
+def _model_intent(question: str, ai_provider: AIProvider | None) -> dict[str, Any]:
+    if ai_provider is None:
+        return {}
+    messages = [
+        AIMessage(
+            role="system",
+            content=(
+                "Classify the legal retrieval question into JSON using only domain, "
+                "operation, filters, and return_fields. Domains: project, contract, "
+                "license, cross_domain. Return JSON only."
+            ),
+        ),
+        AIMessage(role="user", content=question),
+    ]
+    response = ai_provider.complete(messages)
+    try:
+        parsed = json.loads(response.content)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _tool_node(

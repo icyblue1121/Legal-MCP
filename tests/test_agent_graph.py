@@ -4,6 +4,7 @@ from pathlib import Path
 
 from legal_mcp import db
 from legal_mcp.agent_graph import run_agent_query
+from legal_mcp.ai_provider import AIMessage
 
 
 def _database_with_project(path: Path) -> None:
@@ -48,3 +49,36 @@ def test_run_agent_query_returns_answer_and_persists_run(tmp_path: Path) -> None
     assert row["thread_id"] == "pytest-thread"
     assert row["status"] == "success"
     assert row["selected_tool"] == "get_project_fields"
+
+
+class FakeAIProvider:
+    def __init__(self) -> None:
+        self.messages: list[AIMessage] = []
+
+    def complete(self, messages: list[AIMessage]) -> AIMessage:
+        self.messages = messages
+        return AIMessage(
+            role="assistant",
+            content='{"domain":"project","operation":"search","filters":[]}',
+        )
+
+
+def test_agent_graph_can_use_ai_provider_without_exposing_tools(tmp_path: Path) -> None:
+    database_path = tmp_path / "legal.db"
+    _database_with_project(database_path)
+    provider = FakeAIProvider()
+
+    result = run_agent_query(
+        question="MGAME 的官网是什么？",
+        database_path=database_path,
+        checkpoint_path=tmp_path / "agent-checkpoints.sqlite",
+        audit_path=tmp_path / "audit.jsonl",
+        thread_id="pytest-provider-thread",
+        ai_provider=provider,
+    )
+
+    assert result["status"] == "success"
+    assert provider.messages
+    serialized_messages = "\n".join(message.content for message in provider.messages)
+    assert "database handle" not in serialized_messages
+    assert "get_project_fields" not in serialized_messages
