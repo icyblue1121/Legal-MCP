@@ -1,6 +1,9 @@
+x-legal-mcp-image: &legal-mcp-image legal-mcp:v1.4
+
 services:
   legal-mcp:
-    build: .
+    image: *legal-mcp-image
+    pull_policy: never
     ports:
       - "8765:8765"
     environment:
@@ -11,3 +14,14 @@ services:
       - sh
       - -c
       - legal-mcp serve-http --host 0.0.0.0 --port 8765 --db /data/legal.db --audit-log /data/audit.jsonl --token "$$LEGAL_MCP_TOKEN"
+  legal-mcp-admin:
+    image: *legal-mcp-image
+    pull_policy: never
+    ports:
+      - "127.0.0.1:8766:8766"
+    volumes:
+      - ./data:/data
+    command:
+      - sh
+      - -c
+      - legal-mcp serve-admin --host 0.0.0.0 --port 8766 --db /data/legal.db

@@ -147,6 +147,47 @@ args = [
 
 For a small team pilot, run one shared Legal-MCP HTTP server on an intranet host and let each team member connect through a local stdio proxy.
 
+### Weak Network or Offline Docker Startup
+
+The default Docker Compose file uses the local `legal-mcp:v1.4` image and sets
+`pull_policy: never`, so server startup does not try to download or rebuild the
+Legal-MCP image. Prepare the Legal-MCP and Langfuse images once on a machine
+with reliable network access:
+
+```sh
+scripts/prepare-offline-images.sh legal-mcp-v1.4-images.tar
+```
+
+Copy `legal-mcp-v1.4-images.tar` to the server, then load the images and start
+the services:
+
+```sh
+scripts/load-offline-images.sh legal-mcp-v1.4-images.tar
+```
+
+Langfuse runs from `docker-compose.langfuse.yml`. The scripts include it by
+default. After startup, open the Langfuse UI at:
+
+```sh
+http://127.0.0.1:3000
+```
+
+The local bootstrap account comes from `.env`:
+`LANGFUSE_INIT_USER_EMAIL` and `LANGFUSE_INIT_USER_PASSWORD`. Change the
+generated local password before exposing the UI beyond localhost.
+
+For local source changes, rebuild the Legal-MCP image explicitly:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.langfuse.yml -f docker-compose.build.yml build legal-mcp
+```
+
+To start the full v1.4 stack without loading an offline archive first:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.langfuse.yml up -d
+```
+
 Operator:
 
 ```sh
