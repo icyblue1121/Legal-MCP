@@ -55,8 +55,8 @@ def test_cli_accepts_serve_http_options() -> None:
             "127.0.0.1",
             "--port",
             "8765",
-            "--token",
-            "secret-token",
+            "--legacy-token",
+            "legacy-token",
             "--allow-origin",
             "http://legal.internal",
         ]
@@ -65,14 +65,14 @@ def test_cli_accepts_serve_http_options() -> None:
     assert args.command == "serve-http"
     assert args.host == "127.0.0.1"
     assert args.port == 8765
-    assert args.token == "secret-token"
+    assert args.legacy_token == "legacy-token"
     assert args.allowed_origins == ["http://legal.internal"]
 
 
 def test_serve_http_parses_agent_public_only() -> None:
     parser = main.__globals__["build_parser"]()
 
-    args = parser.parse_args(["serve-http", "--token", "secret", "--agent-public-only"])
+    args = parser.parse_args(["serve-http", "--agent-public-only"])
 
     assert args.agent_public_only is True
 
@@ -83,8 +83,6 @@ def test_serve_http_parses_update_check_url() -> None:
     args = parser.parse_args(
         [
             "serve-http",
-            "--token",
-            "secret",
             "--update-check-url",
             "https://updates.example/legal-mcp.json",
         ]
@@ -244,14 +242,14 @@ def test_cli_accepts_proxy_options() -> None:
             "proxy",
             "--url",
             "http://legal.internal:8765/mcp",
-            "--token",
-            "secret-token",
+            "--api-key",
+            "lmcp_user-api-key",
         ]
     )
 
     assert args.command == "proxy"
     assert args.url == "http://legal.internal:8765/mcp"
-    assert args.token == "secret-token"
+    assert args.api_key == "lmcp_user-api-key"
 
 
 def test_cli_setup_accepts_common_ai_app_clients() -> None:
@@ -281,13 +279,13 @@ def test_cli_setup_accepts_remote_proxy_options() -> None:
             "codex",
             "--remote-url",
             "http://legal.internal:8765/mcp",
-            "--token",
-            "secret-token",
+            "--api-key",
+            "lmcp_user-api-key",
         ]
     )
 
     assert args.remote_url == "http://legal.internal:8765/mcp"
-    assert args.token == "secret-token"
+    assert args.api_key == "lmcp_user-api-key"
 
 
 def test_cli_doctor_accepts_remote_url() -> None:

@@ -54,13 +54,13 @@ For team deployments, each desktop client can keep using a local stdio MCP entry
 legal-mcp setup \
   --client codex \
   --remote-url http://legal-mcp.internal:8765/mcp \
-  --token "$LEGAL_MCP_TOKEN"
+  --api-key "$LEGAL_MCP_API_KEY"
 ```
 
 The generated server command is:
 
 ```sh
-legal-mcp proxy --url http://legal-mcp.internal:8765/mcp --token "$LEGAL_MCP_TOKEN"
+legal-mcp proxy --url http://legal-mcp.internal:8765/mcp --api-key "$LEGAL_MCP_API_KEY"
 ```
 
 Run a remote health check:

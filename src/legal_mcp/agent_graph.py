@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 from legal_mcp import db
-from legal_mcp.agent_observability import build_trace_metadata, langfuse_callbacks
+from legal_mcp.agent_observability import build_trace_metadata, flush_langfuse, langfuse_callbacks
 from legal_mcp.agent_router import build_query_plan_from_question, clarify_result
 from legal_mcp.audit import DEFAULT_AUDIT_PATH
 from legal_mcp.ai_provider import AIMessage, AIProvider
@@ -164,7 +164,11 @@ def _run_graph(
         if structured_plan is not None:
             initial_state["query_type"] = "search"
             initial_state["query_plan"] = structured_plan
-        return graph.invoke(initial_state, config)
+        try:
+            return graph.invoke(initial_state, config)
+        finally:
+            if callbacks:
+                flush_langfuse()
     finally:
         checkpoint_conn.close()
 

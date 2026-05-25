@@ -209,29 +209,30 @@ docker compose -f docker-compose.yml -f docker-compose.langfuse.yml up -d
 Operator:
 
 ```sh
-export LEGAL_MCP_TOKEN="replace-with-a-long-random-token"
 legal-mcp import project-ledger.xlsx --db /data/legal.db
 legal-mcp serve-http \
   --host 0.0.0.0 \
   --port 8765 \
   --db /data/legal.db \
   --audit-log /data/audit.jsonl \
-  --token "$LEGAL_MCP_TOKEN"
+  --agent-public-only
 ```
 
 Team member:
 
 ```sh
+export LEGAL_MCP_API_KEY="lmcp_replace_with_the_user_api_key"
+
 legal-mcp setup \
   --client codex \
   --remote-url http://legal-mcp.internal:8765/mcp \
-  --token "$LEGAL_MCP_TOKEN"
+  --api-key "$LEGAL_MCP_API_KEY"
 ```
 
 Clients that use the generated stdio config will run:
 
 ```sh
-legal-mcp proxy --url http://legal-mcp.internal:8765/mcp --token "$LEGAL_MCP_TOKEN"
+legal-mcp proxy --url http://legal-mcp.internal:8765/mcp --api-key "$LEGAL_MCP_API_KEY"
 ```
 
 Claude Code users should choose `claude-code` instead of `claude`:
@@ -240,7 +241,7 @@ Claude Code users should choose `claude-code` instead of `claude`:
 legal-mcp setup \
   --client claude-code \
   --remote-url http://legal-mcp.internal:8765/mcp \
-  --token "$LEGAL_MCP_TOKEN"
+  --api-key "$LEGAL_MCP_API_KEY"
 
 claude mcp list
 ```
@@ -277,7 +278,7 @@ export LEGAL_MCP_API_KEY="lmcp_replace_with_the_user_api_key"
 legal-mcp setup \
   --client codex \
   --remote-url http://legal-mcp.internal:8765/mcp \
-  --token "$LEGAL_MCP_API_KEY"
+  --api-key "$LEGAL_MCP_API_KEY"
 ```
 
 Keep the Admin Web UI on `127.0.0.1` and manage it through an SSH tunnel, or
