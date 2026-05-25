@@ -15,7 +15,7 @@ from legal_mcp.ai_provider import AIMessage, AIProvider
 from legal_mcp.planner import asks_for_access_scope
 from legal_mcp.policy import AccessContext
 from legal_mcp.query_authorization import authorize_query_plan
-from legal_mcp.query_plan import QueryPlan, validate_query_plan
+from legal_mcp.query_plan import QueryFilter, QueryPlan, validate_query_plan
 from legal_mcp.search_tools import execute_search_plan
 from legal_mcp.tools_access import describe_my_access
 
@@ -55,15 +55,50 @@ def run_agent_query(
         thread_id=actual_thread_id,
         ai_provider=ai_provider,
     )
+    result = _result_from_state(state, actual_thread_id)
+    _record_agent_run(database_path, actual_thread_id, question, result)
+    return result
+
+
+def run_structured_query(
+    *,
+    query: dict[str, Any],
+    database_path: str | Path,
+    checkpoint_path: str | Path | None = None,
+    audit_path: str | Path = DEFAULT_AUDIT_PATH,
+    access_context: AccessContext | None = None,
+    thread_id: str | None = None,
+) -> dict[str, Any]:
+    plan = _query_plan_from_payload(query)
+    actual_thread_id = thread_id or str(uuid.uuid4())
+    actual_checkpoint_path = (
+        Path(checkpoint_path) if checkpoint_path else _default_checkpoint_path(database_path)
+    )
+    state = _run_graph(
+        question="structured_query",
+        database_path=database_path,
+        audit_path=audit_path,
+        access_context=access_context,
+        checkpoint_path=actual_checkpoint_path,
+        thread_id=actual_thread_id,
+        structured_plan=plan,
+    )
+    result = _result_from_state(state, actual_thread_id)
+    _record_agent_run(database_path, actual_thread_id, "structured_query", result)
+    return result
+
+
+def _result_from_state(state: AgentState, thread_id: str) -> dict[str, Any]:
     result: dict[str, Any] = {
         "answer": state.get("answer", ""),
-        "thread_id": actual_thread_id,
+        "thread_id": thread_id,
         "tool_calls": state.get("tool_calls", []),
         "status": "error" if state.get("error") else "success",
     }
+    if "tool_result" in state:
+        result["result"] = state["tool_result"]
     if state.get("error"):
         result["error"] = state["error"]
-    _record_agent_run(database_path, actual_thread_id, question, result)
     return result
 
 
@@ -80,6 +115,7 @@ def _run_graph(
     checkpoint_path: Path,
     thread_id: str,
     ai_provider: AIProvider | None = None,
+    structured_plan: QueryPlan | None = None,
 ) -> AgentState:
     try:
         from langgraph.checkpoint.sqlite import SqliteSaver
@@ -93,6 +129,7 @@ def _run_graph(
             checkpoint_path=checkpoint_path,
             thread_id=thread_id,
             ai_provider=ai_provider,
+            structured_plan=structured_plan,
         )
 
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
@@ -123,7 +160,11 @@ def _run_graph(
                     else None
                 ),
             )
-        return graph.invoke({"question": question}, config)
+        initial_state: AgentState = {"question": question}
+        if structured_plan is not None:
+            initial_state["query_type"] = "search"
+            initial_state["query_plan"] = structured_plan
+        return graph.invoke(initial_state, config)
     finally:
         checkpoint_conn.close()
 
@@ -173,6 +214,7 @@ def _run_linear_graph(
     checkpoint_path: Path,
     thread_id: str,
     ai_provider: AIProvider | None = None,
+    structured_plan: QueryPlan | None = None,
 ) -> AgentState:
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     checkpoint_conn = sqlite3.connect(checkpoint_path)
@@ -188,6 +230,9 @@ def _run_linear_graph(
             """
         )
         state: AgentState = {"question": question}
+        if structured_plan is not None:
+            state["query_type"] = "search"
+            state["query_plan"] = structured_plan
         nodes = (
             ("classify_question", lambda: classify_question(state, ai_provider)),
             ("normalize_query", lambda: normalize_query(state)),
@@ -221,6 +266,8 @@ def classify_question(
     state: AgentState,
     ai_provider: AIProvider | None = None,
 ) -> dict[str, Any]:
+    if state.get("query_plan") is not None:
+        return {"query_type": "search"}
     model_intent = _model_intent(state["question"], ai_provider)
     if asks_for_access_scope(state["question"]):
         update: dict[str, Any] = {"query_type": "access"}
@@ -261,6 +308,8 @@ def normalize_query(state: AgentState) -> dict[str, Any]:
 
 def build_query_plan(state: AgentState) -> dict[str, Any]:
     if state.get("query_type") != "search":
+        return {}
+    if state.get("query_plan") is not None:
         return {}
     plan = build_query_plan_from_question(state["normalized_question"])
     if plan is None:
@@ -396,6 +445,29 @@ def _checkpoint_state(state: AgentState) -> dict[str, Any]:
 
 def _plan_to_dict(plan: QueryPlan) -> dict[str, Any]:
     return asdict(plan)
+
+
+def _query_plan_from_payload(payload: dict[str, Any]) -> QueryPlan:
+    filters = payload.get("filters", [])
+    return QueryPlan(
+        domain=str(payload.get("domain", "")),
+        operation=str(payload.get("operation", "")),
+        filters=[
+            QueryFilter(
+                field=str(item.get("field", "")),
+                operator=str(item.get("operator", "")),
+                value=item.get("value"),
+            )
+            for item in filters
+            if isinstance(item, dict)
+        ],
+        return_fields=[
+            str(field)
+            for field in payload.get("return_fields", [])
+            if isinstance(field, str)
+        ],
+        limit=payload.get("limit", 20),
+    )
 
 
 def _record_agent_run(

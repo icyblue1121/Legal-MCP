@@ -133,6 +133,19 @@ def call_tool(
                         access_context=access_context,
                         thread_id=thread_id if isinstance(thread_id, str) else None,
                     )
+            elif tool_name == "structured_query":
+                query = arguments.get("query")
+                if not isinstance(query, dict):
+                    result = _error("validation_error", "query is required")
+                else:
+                    from legal_mcp.agent_graph import run_structured_query
+
+                    result = run_structured_query(
+                        query=query,
+                        database_path=database_path,
+                        audit_path=audit_path,
+                        access_context=access_context,
+                    )
             elif tool_name == "get_project_context":
                 result = _error(
                     "deprecated_tool",
