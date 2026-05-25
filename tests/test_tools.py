@@ -196,6 +196,38 @@ def test_structured_query_runs_through_graph_authorization(tmp_path) -> None:
     ]
 
 
+def test_agent_write_returns_proposal_not_direct_write(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        seed_project(conn, code="Mgame", name="失序之地")
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "agent_write",
+        {
+            "instruction": "把 Mgame 的法务 BP 改成李四",
+            "rationale": "draft update for review",
+        },
+        database_path=database_path,
+    )
+
+    conn = db.connect(database_path)
+    try:
+        row = conn.execute(
+            "select legal_bp from projects where project_code = ?",
+            ("Mgame",),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert result["proposal"]["requires_approval"] is True
+    assert "diff" in result["proposal"]
+    assert row["legal_bp"] == "Ava"
+
+
 def test_project_not_found_error_includes_visible_access_summary(tmp_path) -> None:
     database_path = tmp_path / "legal.db"
     db.initialize_database(database_path)

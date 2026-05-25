@@ -146,6 +146,12 @@ def call_tool(
                         audit_path=audit_path,
                         access_context=access_context,
                     )
+            elif tool_name == "agent_write":
+                instruction = arguments.get("instruction")
+                if not isinstance(instruction, str) or not instruction.strip():
+                    result = _error("validation_error", "instruction is required")
+                else:
+                    result = _agent_write_proposal(instruction)
             elif tool_name == "get_project_context":
                 result = _error(
                     "deprecated_tool",
@@ -176,6 +182,19 @@ def call_tool(
         disclosures,
     )
     return result
+
+
+def _agent_write_proposal(instruction: str) -> dict[str, Any]:
+    return {
+        "proposal": {
+            "requires_approval": True,
+            "instruction": instruction,
+            "diff": {
+                "summary": "待人工审核的资料变更建议；v1.4.1 不直接写入 SQLite。",
+                "operations": [],
+            },
+        }
+    }
 
 
 def _append_access_summary_to_project_not_found(
