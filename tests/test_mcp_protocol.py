@@ -59,12 +59,27 @@ def test_handle_tools_list_returns_legal_mcp_tools(tmp_path: Path) -> None:
     )
 
     names = [tool["name"] for tool in response["result"]["tools"]]
+    assert names == [
+        "agent_query",
+        "agent_write",
+        "describe_my_access",
+        "structured_query",
+    ]
+
+
+def test_handle_tools_list_can_expose_internal_debug_tools(tmp_path: Path) -> None:
+    response = handle_message(
+        {"jsonrpc": "2.0", "id": 12, "method": "tools/list", "params": {}},
+        database_path=tmp_path / "legal.db",
+        audit_path=tmp_path / "audit.jsonl",
+        internal_debug=True,
+    )
+
+    names = [tool["name"] for tool in response["result"]["tools"]]
     assert "resolve_project" in names
-    assert "describe_my_access" in names
     assert "get_project_fields" in names
     assert "list_project_contracts" in names
     assert "list_project_licenses" in names
-    assert "get_project_context" not in names
     get_project_fields = next(
         tool for tool in response["result"]["tools"] if tool["name"] == "get_project_fields"
     )

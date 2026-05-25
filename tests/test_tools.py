@@ -149,6 +149,85 @@ def test_describe_my_access_returns_visible_projects_and_granted_fields(tmp_path
     assert "GAME-002" not in str(result)
 
 
+def test_structured_query_runs_through_graph_authorization(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        project_id = seed_project(conn, code="MGAME", name="失序之地")
+        conn.execute("update projects set legal_bp = ? where id = ?", ("张三", project_id))
+        legal_user = create_user(
+            conn,
+            email="structured-query@example.com",
+            display_name="Structured Query",
+            role=ROLE_LEGAL,
+        )
+        grant_project_access(conn, user_id=legal_user["id"], project_id=project_id)
+        grant_field_access(
+            conn,
+            user_id=legal_user["id"],
+            project_id=project_id,
+            data_domain="project",
+            field_name="legal_bp",
+        )
+        context = AccessContext.from_user(legal_user)
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "structured_query",
+        {
+            "query": {
+                "domain": "project",
+                "operation": "search",
+                "filters": [{"field": "legal_bp", "operator": "eq", "value": "张三"}],
+                "return_fields": ["project_code", "name"],
+                "limit": 20,
+            },
+            "rationale": "find projects by legal bp",
+        },
+        database_path=database_path,
+        access_context=context,
+    )
+
+    assert result["status"] == "success"
+    assert result["result"]["projects"] == [
+        {"project_code": "MGAME", "name": "失序之地"}
+    ]
+
+
+def test_agent_write_returns_proposal_not_direct_write(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        seed_project(conn, code="Mgame", name="失序之地")
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "agent_write",
+        {
+            "instruction": "把 Mgame 的法务 BP 改成李四",
+            "rationale": "draft update for review",
+        },
+        database_path=database_path,
+    )
+
+    conn = db.connect(database_path)
+    try:
+        row = conn.execute(
+            "select legal_bp from projects where project_code = ?",
+            ("Mgame",),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert result["proposal"]["requires_approval"] is True
+    assert "diff" in result["proposal"]
+    assert row["legal_bp"] == "Ava"
+
+
 def test_project_not_found_error_includes_visible_access_summary(tmp_path) -> None:
     database_path = tmp_path / "legal.db"
     db.initialize_database(database_path)

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from legal_mcp.agent_router import route_question, validate_agent_decision
+from legal_mcp.agent_router import (
+    build_query_plan_from_question,
+    route_question,
+    validate_agent_decision,
+)
 
 
 def test_route_question_uses_existing_planner_for_project_field_question() -> None:
@@ -35,3 +39,42 @@ def test_validate_agent_decision_rejects_fields_outside_capability() -> None:
     result = validate_agent_decision(unsafe)
 
     assert result["error"]["code"] == "agent_field_not_allowed"
+
+
+def test_build_query_plan_for_legal_bp_project_search() -> None:
+    plan = build_query_plan_from_question("张三是哪些项目的法务BP？")
+
+    assert plan is not None
+    assert plan.domain == "project"
+    assert plan.operation == "search"
+    assert [(query_filter.field, query_filter.operator, query_filter.value) for query_filter in plan.filters] == [
+        ("legal_bp", "eq", "张三")
+    ]
+
+
+def test_build_query_plan_for_contract_counterparty_search() -> None:
+    plan = build_query_plan_from_question("哪些合同的相对方包含腾讯？")
+
+    assert plan is not None
+    assert plan.domain == "contract"
+    assert plan.filters[0].field == "counterparty"
+    assert plan.filters[0].operator == "contains"
+    assert plan.filters[0].value == "腾讯"
+
+
+def test_build_query_plan_for_license_actual_operator_search() -> None:
+    plan = build_query_plan_from_question("某公司是哪些资质的实际运营方？")
+
+    assert plan is not None
+    assert plan.domain == "license"
+    assert plan.filters[0].field == "actual_operator"
+    assert plan.filters[0].value == "某公司"
+
+
+def test_build_query_plan_for_cross_domain_search() -> None:
+    plan = build_query_plan_from_question("张三关联哪些资料？")
+
+    assert plan is not None
+    assert plan.domain == "cross_domain"
+    assert plan.filters[0].field == "q"
+    assert plan.filters[0].value == "张三"

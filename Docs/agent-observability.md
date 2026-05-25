@@ -1,9 +1,16 @@
 # Agent Observability
 
 Legal-MCP v1.4 routes `agent_query` through a server-side LangGraph workflow.
-The graph selects approved internal read tools, executes them through
-`legal_mcp.tools.call_tool`, writes Legal-MCP audit records, and stores run
-metadata in SQLite.
+Legal-MCP v1.4.1 makes that graph the retrieval boundary: production MCP
+clients see only graph entry tools, not raw database-backed tools. The normal
+catalog exposes `agent_query`, `agent_write`, `describe_my_access`, and
+`structured_query`.
+
+The graph classifies and normalizes each query, builds a constrained plan,
+authorizes filter fields and return fields, executes internal project,
+contract, license, or cross-domain search, writes Legal-MCP audit records, and
+stores run metadata in SQLite. External AI clients cannot directly access
+database tools or receive a database handle.
 
 ## Optional Agent Dependencies
 
@@ -32,9 +39,26 @@ export LEGAL_MCP_AGENT_MODEL="gpt-4.1-mini"
 `OPENAI_BASE_URL` is optional when using the default OpenAI API endpoint.
 `LEGAL_MCP_AGENT_MODEL` defaults to `gpt-4.1-mini`.
 
+For the v1.4.1 provider adapter, prefer the explicit server-side AI variables:
+
+```sh
+export LEGAL_MCP_AI_PROVIDER="openai_compatible"
+export LEGAL_MCP_AI_MODEL="qwen-local"
+export LEGAL_MCP_AI_BASE_URL="http://127.0.0.1:11434/v1"
+export LEGAL_MCP_AI_API_KEY="replace-with-server-key"
+```
+
+These settings can point at OpenAI-compatible intranet or future local model
+endpoints without changing graph nodes. The provider returns an intent or plan
+candidate only; it is not given callable database tools.
+
 Use `LEGAL_MCP_AGENT_PUBLIC_ONLY=true` or `--agent-public-only` on
 `legal-mcp serve` / `legal-mcp serve-http` when MCP clients should list only
 `agent_query`.
+
+Use `structured_query` for trusted structured payloads that still need the same
+graph validation and authorization path. Use `agent_write` only to create
+review proposals; v1.4.1 does not directly write SQLite from that entry.
 
 ## Self-Hosted Langfuse
 

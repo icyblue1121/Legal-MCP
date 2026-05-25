@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, replace
 from typing import Any
 
 from legal_mcp.planner import plan_query
+from legal_mcp.query_plan import QueryFilter, QueryPlan
 from legal_mcp.tool_catalog import agent_capabilities
 
 
@@ -27,6 +29,75 @@ def route_question(question: str) -> AgentToolDecision:
         arguments=arguments,
         reason=plan.reason,
     )
+
+
+def build_query_plan_from_question(question: str) -> QueryPlan | None:
+    normalized = question.strip().replace(" ", "")
+    if not normalized or "所有项目资料" in normalized:
+        return None
+
+    match = re.search(r"(.+?)是哪些项目的法务BP", normalized, re.IGNORECASE)
+    if match:
+        return QueryPlan(
+            domain="project",
+            operation="search",
+            filters=[QueryFilter(field="legal_bp", operator="eq", value=match.group(1))],
+            return_fields=["project_code", "name"],
+            limit=50,
+        )
+
+    match = re.search(r"哪些合同.*相对方包含(.+?)[？?]?$", normalized)
+    if match:
+        return QueryPlan(
+            domain="contract",
+            operation="search",
+            filters=[
+                QueryFilter(field="counterparty", operator="contains", value=match.group(1))
+            ],
+            return_fields=["contract_number", "title", "counterparty"],
+            limit=50,
+        )
+
+    match = re.search(r"(.+?)是哪些资质的实际运营方", normalized)
+    if match:
+        return QueryPlan(
+            domain="license",
+            operation="search",
+            filters=[
+                QueryFilter(field="actual_operator", operator="eq", value=match.group(1))
+            ],
+            return_fields=["license_type", "actual_operator"],
+            limit=50,
+        )
+
+    match = re.search(r"(.+?)关联哪些资料", normalized)
+    if match:
+        return QueryPlan(
+            domain="cross_domain",
+            operation="search",
+            filters=[QueryFilter(field="q", operator="contains", value=match.group(1))],
+            return_fields=[
+                "project_code",
+                "name",
+                "contract_number",
+                "title",
+                "license_type",
+                "actual_operator",
+            ],
+            limit=50,
+        )
+
+    match = re.search(r"(.+?)的官网是什么", normalized)
+    if match:
+        return QueryPlan(
+            domain="project",
+            operation="lookup",
+            filters=[QueryFilter(field="project_code", operator="eq", value=match.group(1))],
+            return_fields=["project_code", "name", "website"],
+            limit=1,
+        )
+
+    return None
 
 
 def validate_agent_decision(decision: AgentToolDecision) -> dict[str, Any]:

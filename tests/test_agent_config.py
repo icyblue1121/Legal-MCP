@@ -28,7 +28,24 @@ def test_load_agent_config_reads_openai_compatible_settings(monkeypatch) -> None
         enabled=True,
         model="local-router",
         openai_base_url="http://localhost:4000/v1",
+        ai_provider="openai_compatible",
+        ai_model="local-router",
+        ai_base_url="http://localhost:4000/v1",
+        ai_api_key="test-key",
         public_agent_only=True,
         langfuse_enabled=True,
         langfuse_base_url="http://127.0.0.1:3000",
     )
+
+
+def test_agent_config_reads_ai_provider(monkeypatch) -> None:
+    monkeypatch.setenv("LEGAL_MCP_AI_PROVIDER", "openai_compatible")
+    monkeypatch.setenv("LEGAL_MCP_AI_BASE_URL", "http://127.0.0.1:11434/v1")
+    monkeypatch.setenv("LEGAL_MCP_AI_MODEL", "qwen-local")
+    monkeypatch.setenv("LEGAL_MCP_AI_API_KEY", "local-key")
+
+    config = load_agent_config()
+
+    assert config.ai_provider == "openai_compatible"
+    assert config.ai_base_url == "http://127.0.0.1:11434/v1"
+    assert config.ai_model == "qwen-local"

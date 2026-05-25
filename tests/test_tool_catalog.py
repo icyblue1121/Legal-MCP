@@ -20,7 +20,7 @@ def test_catalog_entries_have_machine_readable_capabilities() -> None:
 
 
 def test_tool_definitions_include_catalog_metadata() -> None:
-    definitions = tool_definitions()
+    definitions = tool_definitions(internal_debug=True)
     names = {tool["name"] for tool in definitions}
     resolve_project = next(
         tool for tool in definitions if tool["name"] == "resolve_project"
@@ -67,10 +67,24 @@ def test_public_catalog_can_expose_only_agent_query() -> None:
     assert names == ["agent_query"]
 
 
-def test_internal_catalog_keeps_fine_grained_tools() -> None:
+def test_public_catalog_exposes_only_graph_entry_tools() -> None:
     names = [tool["name"] for tool in tool_definitions(public_agent_only=False)]
 
-    assert "agent_query" in names
+    assert names == [
+        "agent_query",
+        "agent_write",
+        "describe_my_access",
+        "structured_query",
+    ]
+
+
+def test_internal_catalog_keeps_legacy_tools_for_tests_only() -> None:
+    names = [
+        tool["name"]
+        for tool in tool_definitions(public_agent_only=False, internal_debug=True)
+    ]
+
     assert "get_project_fields" in names
+    assert "list_project_contracts" in names
     assert "list_project_licenses" in names
     assert "propose_project_update" not in names

@@ -95,10 +95,28 @@ send a natural-language question; the server-side LangGraph workflow selects and
 executes approved internal tools, preserving minimum disclosure and audit
 records.
 
+Legal-MCP v1.4.1 narrows the production MCP catalog to graph entry tools:
+`agent_query`, `agent_write`, `describe_my_access`, and `structured_query`.
+External AI clients cannot directly access database tools such as
+`get_project_fields`, `list_project_contracts`, or `list_project_licenses`.
+Project, contract, license, and cross-domain retrieval run inside the server
+through LangGraph. Both filter fields and return fields are permission-checked
+before SQLite results are formatted for the client.
+
+Use `agent_query` for natural-language read questions. Use `structured_query`
+only when a trusted client already has a constrained query payload; it still
+enters the same graph validation, authorization, execution, and answer-shaping
+path. `agent_write` is proposal-only in v1.4.1 and does not mutate SQLite.
+
 Set `LEGAL_MCP_AGENT_PUBLIC_ONLY=true` or pass `--agent-public-only` to
 `legal-mcp serve` or `legal-mcp serve-http` when clients should see only
 `agent_query` in `tools/list`. Configure the agent with `OPENAI_API_KEY`,
 optional `OPENAI_BASE_URL`, and optional `LEGAL_MCP_AGENT_MODEL`.
+
+For OpenAI-compatible, intranet, or future local model routing, configure
+`LEGAL_MCP_AI_PROVIDER`, `LEGAL_MCP_AI_MODEL`, `LEGAL_MCP_AI_BASE_URL`, and
+`LEGAL_MCP_AI_API_KEY`. These settings belong to the server-side workflow; MCP
+callers do not provide model tools or database handles.
 
 For tracing, use self-hosted Langfuse only. `LANGFUSE_PUBLIC_KEY`,
 `LANGFUSE_SECRET_KEY`, and `LANGFUSE_BASE_URL=http://127.0.0.1:3000` enable
@@ -146,6 +164,47 @@ args = [
 ## Team Deployment
 
 For a small team pilot, run one shared Legal-MCP HTTP server on an intranet host and let each team member connect through a local stdio proxy.
+
+### Weak Network or Offline Docker Startup
+
+The default Docker Compose file uses the local `legal-mcp:v1.4` image and sets
+`pull_policy: never`, so server startup does not try to download or rebuild the
+Legal-MCP image. Prepare the Legal-MCP and Langfuse images once on a machine
+with reliable network access:
+
+```sh
+scripts/prepare-offline-images.sh legal-mcp-v1.4-images.tar
+```
+
+Copy `legal-mcp-v1.4-images.tar` to the server, then load the images and start
+the services:
+
+```sh
+scripts/load-offline-images.sh legal-mcp-v1.4-images.tar
+```
+
+Langfuse runs from `docker-compose.langfuse.yml`. The scripts include it by
+default. After startup, open the Langfuse UI at:
+
+```sh
+http://127.0.0.1:3000
+```
+
+The local bootstrap account comes from `.env`:
+`LANGFUSE_INIT_USER_EMAIL` and `LANGFUSE_INIT_USER_PASSWORD`. Change the
+generated local password before exposing the UI beyond localhost.
+
+For local source changes, rebuild the Legal-MCP image explicitly:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.langfuse.yml -f docker-compose.build.yml build legal-mcp
+```
+
+To start the full v1.4 stack without loading an offline archive first:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.langfuse.yml up -d
+```
 
 Operator:
 
