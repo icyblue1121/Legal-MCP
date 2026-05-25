@@ -102,6 +102,11 @@ def _run_graph(
                 thread_id=thread_id,
                 tool_name=None,
                 status="started",
+                user_id=(
+                    str(access_context.user_id)
+                    if access_context is not None and access_context.user_id is not None
+                    else None
+                ),
             )
         return graph.invoke({"question": question}, config)
     finally:

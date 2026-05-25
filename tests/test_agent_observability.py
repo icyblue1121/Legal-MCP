@@ -23,10 +23,16 @@ def test_build_trace_metadata_excludes_raw_tool_result() -> None:
         thread_id="thread-1",
         tool_name="get_project_fields",
         status="success",
+        user_id="user-1",
         result={"project": {"website": "https://sensitive.example"}},
     )
 
     assert metadata["thread_id"] == "thread-1"
     assert metadata["tool_name"] == "get_project_fields"
     assert metadata["status"] == "success"
+    assert metadata["feature"] == "agent_query"
+    assert metadata["langfuse_session_id"] == "thread-1"
+    assert metadata["langfuse_trace_name"] == "legal-mcp-agent-query"
+    assert metadata["langfuse_tags"] == ["legal-mcp", "agent_query", "success"]
+    assert metadata["langfuse_user_id"] == "user-1"
     assert "result" not in metadata
