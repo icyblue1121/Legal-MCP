@@ -12,8 +12,11 @@ def _database_with_project(path: Path) -> None:
     conn = db.connect(path)
     try:
         conn.execute(
-            "insert into projects (project_code, name, stage, website) values (?, ?, ?, ?)",
-            ("MGAME", "失序之地", "测试中", "https://example.test"),
+            """
+            insert into projects (project_code, name, stage, legal_bp, website)
+            values (?, ?, ?, ?, ?)
+            """,
+            ("MGAME", "失序之地", "测试中", "张三", "https://example.test"),
         )
         conn.commit()
     finally:
@@ -36,7 +39,7 @@ def test_run_agent_query_returns_answer_and_persists_run(tmp_path: Path) -> None
 
     assert result["thread_id"] == "pytest-thread"
     assert "https://example.test" in result["answer"]
-    assert result["tool_calls"][0]["tool_name"] == "get_project_fields"
+    assert result["tool_calls"][0]["tool_name"] == "project/lookup"
     assert checkpoint_path.exists()
 
     conn = db.connect(database_path)
@@ -48,7 +51,90 @@ def test_run_agent_query_returns_answer_and_persists_run(tmp_path: Path) -> None
         conn.close()
     assert row["thread_id"] == "pytest-thread"
     assert row["status"] == "success"
-    assert row["selected_tool"] == "get_project_fields"
+    assert row["selected_tool"] == "project/lookup"
+
+
+def test_agent_graph_builds_project_search_plan_for_legal_bp(tmp_path: Path) -> None:
+    database_path = tmp_path / "legal.db"
+    _database_with_project(database_path)
+
+    result = run_agent_query(
+        question="张三是哪些项目的法务BP？",
+        database_path=database_path,
+        checkpoint_path=tmp_path / "agent-checkpoints.sqlite",
+        audit_path=tmp_path / "audit.jsonl",
+        thread_id="pytest-search-thread",
+    )
+
+    assert result["status"] == "success"
+    assert result["tool_calls"][0]["tool_name"] == "project/search"
+    assert result["tool_calls"][0]["plan"]["filters"] == [
+        {"field": "legal_bp", "operator": "eq", "value": "张三"}
+    ]
+    assert "失序之地" in result["answer"]
+
+
+def test_agent_graph_builds_contract_license_and_cross_domain_plans(tmp_path: Path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        project_id = conn.execute(
+            """
+            insert into projects (project_code, name, stage, legal_bp)
+            values (?, ?, ?, ?)
+            """,
+            ("MGAME", "失序之地", "live", "张三"),
+        ).lastrowid
+        conn.execute(
+            """
+            insert into contracts (project_id, external_key, title, contract_number, counterparty)
+            values (?, ?, ?, ?, ?)
+            """,
+            (project_id, "C-001", "腾讯框架合同", "C-001", "腾讯科技"),
+        )
+        conn.execute(
+            """
+            insert into licenses (project_id, external_key, license_type, actual_operator)
+            values (?, ?, ?, ?)
+            """,
+            (project_id, "L-001", "版号", "某公司"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    cases = [
+        ("哪些合同的相对方包含腾讯？", "contract/search"),
+        ("某公司是哪些资质的实际运营方？", "license/search"),
+        ("张三关联哪些资料？", "cross_domain/search"),
+    ]
+    for question, expected_tool_name in cases:
+        result = run_agent_query(
+            question=question,
+            database_path=database_path,
+            checkpoint_path=tmp_path / f"{expected_tool_name.replace('/', '-')}.sqlite",
+            audit_path=tmp_path / "audit.jsonl",
+        )
+
+        assert result["status"] == "success"
+        assert result["tool_calls"][0]["tool_name"] == expected_tool_name
+
+
+def test_agent_graph_routes_ambiguous_questions_to_clarification(tmp_path: Path) -> None:
+    database_path = tmp_path / "legal.db"
+    _database_with_project(database_path)
+
+    result = run_agent_query(
+        question="把所有项目资料都给我",
+        database_path=database_path,
+        checkpoint_path=tmp_path / "agent-checkpoints.sqlite",
+        audit_path=tmp_path / "audit.jsonl",
+    )
+
+    assert result["status"] == "success"
+    assert result["tool_calls"][0]["tool_name"] == "clarify_query"
+    assert "请明确" in result["answer"]
 
 
 class FakeAIProvider:
