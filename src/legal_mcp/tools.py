@@ -133,6 +133,7 @@ def call_tool(
                         access_context=access_context,
                         thread_id=thread_id if isinstance(thread_id, str) else None,
                     )
+                    _append_graph_result_disclosures(conn, result, disclosures)
             elif tool_name == "structured_query":
                 query = arguments.get("query")
                 if not isinstance(query, dict):
@@ -146,6 +147,7 @@ def call_tool(
                         audit_path=audit_path,
                         access_context=access_context,
                     )
+                    _append_graph_result_disclosures(conn, result, disclosures)
             elif tool_name == "agent_write":
                 instruction = arguments.get("instruction")
                 if not isinstance(instruction, str) or not instruction.strip():
@@ -213,7 +215,39 @@ def _append_access_summary_to_project_not_found(
     )
     details = error.setdefault("details", {})
     if isinstance(details, dict):
-        details["access"] = build_access_summary(conn, access_context)
+            details["access"] = build_access_summary(conn, access_context)
+
+
+def _append_graph_result_disclosures(
+    conn: sqlite3.Connection,
+    result: dict[str, Any],
+    disclosures: list[Disclosure],
+) -> None:
+    graph_result = result.get("result")
+    if not isinstance(graph_result, dict):
+        return
+    for project in graph_result.get("projects", []):
+        if not isinstance(project, dict):
+            continue
+        project_code = project.get("project_code")
+        if not isinstance(project_code, str):
+            continue
+        row = conn.execute(
+            "select id from projects where project_code = ?",
+            (project_code,),
+        ).fetchone()
+        if row is None:
+            continue
+        project_id = int(row["id"])
+        base = Disclosure(
+            project_id=project_id,
+            record_type="project",
+            record_id=project_id,
+            decision="allowed",
+            reason="project_visible",
+        )
+        disclosures.append(base)
+        disclosures.extend(_field_disclosures(base, project, {"project_code", "name"}))
 
 
 def _list_projects(

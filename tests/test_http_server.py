@@ -406,10 +406,12 @@ def test_http_mcp_allows_absent_origin_for_non_browser_clients(http_service) -> 
     )
 
     assert status == 200
-    tool_names = {tool["name"] for tool in payload["result"]["tools"]}
-    assert "resolve_project" in tool_names
-    assert "get_project_fields" in tool_names
-    assert "get_project_context" not in tool_names
+    assert [tool["name"] for tool in payload["result"]["tools"]] == [
+        "agent_query",
+        "agent_write",
+        "describe_my_access",
+        "structured_query",
+    ]
 
 
 def test_http_mcp_can_expose_only_agent_query_with_env(

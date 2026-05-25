@@ -317,6 +317,52 @@ def test_denied_query_filter_field_can_be_audited(tmp_path) -> None:
     }
 
 
+def test_agent_query_project_search_records_graph_disclosure(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        project_id = conn.execute(
+            """
+            insert into projects (project_code, name, stage, legal_bp)
+            values (?, ?, ?, ?)
+            """,
+            ("MGAME", "失序之地", "live", "张三"),
+        ).lastrowid
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = call_tool(
+        "agent_query",
+        {
+            "question": "张三是哪些项目的法务BP？",
+            "rationale": "agent smoke test",
+        },
+        database_path=database_path,
+    )
+
+    conn = db.connect(database_path)
+    try:
+        disclosure = conn.execute(
+            """
+            select project_id, record_type, record_id, decision, reason
+            from audit_disclosures
+            """
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert result["tool_calls"][0]["tool_name"] == "project/search"
+    assert dict(disclosure) == {
+        "project_id": project_id,
+        "record_type": "project",
+        "record_id": project_id,
+        "decision": "allowed",
+        "reason": "project_visible",
+    }
+
+
 def test_hidden_project_lookup_records_denied_disclosure_without_leaking_project(
     tmp_path,
 ) -> None:
