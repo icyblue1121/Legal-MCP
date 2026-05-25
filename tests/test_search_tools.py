@@ -48,6 +48,11 @@ def _seed_database(path: Path) -> AccessContext:
                 """,
                 (user["id"], project_id, grantor["id"]),
             )
+            _grant_field(conn, user["id"], project_id, "project", "legal_bp")
+            _grant_field(conn, user["id"], project_id, "contract", "counterparty")
+            _grant_field(conn, user["id"], project_id, "contract", "handler")
+            _grant_field(conn, user["id"], project_id, "license", "actual_operator")
+            _grant_field(conn, user["id"], project_id, "license", "operating_entity")
         conn.commit()
         return AccessContext.from_user(user)
     finally:
@@ -102,6 +107,31 @@ def _insert_license(
         values (?, ?, ?, ?, ?)
         """,
         (project_id, external_key, license_type, operating_entity, actual_operator),
+    )
+
+
+def _grant_field(
+    conn,
+    user_id: int,
+    project_id: int,
+    data_domain: str,
+    field_name: str,
+) -> None:
+    group_id = conn.execute(
+        "insert into user_groups (name) values (?)",
+        (f"group-{user_id}-{project_id}-{data_domain}-{field_name}",),
+    ).lastrowid
+    conn.execute(
+        "insert into user_group_memberships (user_id, group_id) values (?, ?)",
+        (user_id, group_id),
+    )
+    conn.execute(
+        """
+        insert into permission_grants
+          (group_id, operation, data_domain, field_name, project_id)
+        values (?, ?, ?, ?, ?)
+        """,
+        (group_id, "read", data_domain, field_name, project_id),
     )
 
 

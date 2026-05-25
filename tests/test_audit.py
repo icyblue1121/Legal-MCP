@@ -2,8 +2,11 @@ import json
 import sqlite3
 
 from legal_mcp import db
+from legal_mcp.disclosure_audit import write_audit_event
 from legal_mcp.identity import ROLE_AUDITOR, ROLE_BUSINESS, ROLE_LEGAL, create_user
 from legal_mcp.policy import AccessContext
+from legal_mcp.query_authorization import authorize_query_plan
+from legal_mcp.query_plan import QueryFilter, QueryPlan
 from legal_mcp.tools import call_tool
 
 
@@ -236,6 +239,82 @@ def test_denied_project_field_query_records_denied_field_disclosure(tmp_path) ->
             "reason": "field_not_granted",
         }
     ]
+
+
+def test_denied_query_filter_field_can_be_audited(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        project_id = conn.execute(
+            """
+            insert into projects (project_code, name, stage, legal_bp)
+            values (?, ?, ?, ?)
+            """,
+            ("MGAME", "MGame", "live", "张三"),
+        ).lastrowid
+        business_user = create_user(
+            conn,
+            email="query-filter@example.com",
+            display_name="Query Filter User",
+            role=ROLE_BUSINESS,
+        )
+        legal_user = create_user(
+            conn,
+            email="query-filter-legal@example.com",
+            display_name="Legal User",
+            role=ROLE_LEGAL,
+        )
+        conn.execute(
+            """
+            insert into project_access (user_id, project_id, granted_by_user_id)
+            values (?, ?, ?)
+            """,
+            (business_user["id"], project_id, legal_user["id"]),
+        )
+        conn.commit()
+        context = AccessContext.from_user(business_user)
+        plan = QueryPlan(
+            domain="project",
+            operation="search",
+            filters=[QueryFilter(field="legal_bp", operator="eq", value="张三")],
+            return_fields=["project_code", "name"],
+            limit=20,
+        )
+        authorization = authorize_query_plan(conn, plan, context)
+        result = {
+            "error": {
+                "code": authorization.error_code,
+                "message": authorization.message,
+            }
+        }
+        write_audit_event(
+            conn,
+            context,
+            "structured_query",
+            "find projects by legal bp",
+            "pytest",
+            {"query": {"domain": "project"}},
+            result,
+            authorization.disclosures,
+        )
+        disclosure = conn.execute(
+            """
+            select project_id, record_type, field_name, decision, reason
+            from audit_disclosures
+            """
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert authorization.error_code == "filter_field_access_denied"
+    assert dict(disclosure) == {
+        "project_id": project_id,
+        "record_type": "project",
+        "field_name": "legal_bp",
+        "decision": "denied",
+        "reason": "no_group_membership",
+    }
 
 
 def test_hidden_project_lookup_records_denied_disclosure_without_leaking_project(

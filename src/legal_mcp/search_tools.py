@@ -6,7 +6,8 @@ import sqlite3
 from typing import Any
 
 from legal_mcp.policy import AccessContext, visible_project_ids
-from legal_mcp.query_plan import QueryFilter, QueryPlan, validate_query_plan
+from legal_mcp.query_authorization import authorize_query_plan
+from legal_mcp.query_plan import QueryFilter, QueryPlan
 from legal_mcp.tool_catalog import CONTRACT_FIELDS, LICENSE_FIELDS, PROJECT_FIELDS
 
 PROJECT_COLUMNS = {field: f"projects.{field}" for field in PROJECT_FIELDS}
@@ -20,9 +21,9 @@ def search_projects(
     *,
     access_context: AccessContext | None,
 ) -> dict[str, Any]:
-    validation = validate_query_plan(plan)
-    if not validation.ok:
-        return _error(validation.error_code or "invalid_query_plan", validation.message or "")
+    authorization = authorize_query_plan(conn, plan, access_context)
+    if not authorization.ok:
+        return _error(authorization.error_code or "query_access_denied", authorization.message or "")
     where, params = _where_for_plan(plan, PROJECT_COLUMNS)
     where.extend(_visible_project_filter(conn, access_context, "projects.id", params))
     rows = conn.execute(
@@ -44,9 +45,9 @@ def search_contracts(
     *,
     access_context: AccessContext | None,
 ) -> dict[str, Any]:
-    validation = validate_query_plan(plan)
-    if not validation.ok:
-        return _error(validation.error_code or "invalid_query_plan", validation.message or "")
+    authorization = authorize_query_plan(conn, plan, access_context)
+    if not authorization.ok:
+        return _error(authorization.error_code or "query_access_denied", authorization.message or "")
     where, params = _where_for_plan(plan, CONTRACT_COLUMNS)
     where.extend(_visible_project_filter(conn, access_context, "contracts.project_id", params))
     rows = conn.execute(
@@ -69,9 +70,9 @@ def search_licenses(
     *,
     access_context: AccessContext | None,
 ) -> dict[str, Any]:
-    validation = validate_query_plan(plan)
-    if not validation.ok:
-        return _error(validation.error_code or "invalid_query_plan", validation.message or "")
+    authorization = authorize_query_plan(conn, plan, access_context)
+    if not authorization.ok:
+        return _error(authorization.error_code or "query_access_denied", authorization.message or "")
     where, params = _where_for_plan(plan, LICENSE_COLUMNS)
     where.extend(_visible_project_filter(conn, access_context, "licenses.project_id", params))
     rows = conn.execute(
@@ -94,6 +95,9 @@ def search_cross_domain(
     *,
     access_context: AccessContext | None,
 ) -> dict[str, Any]:
+    authorization = authorize_query_plan(conn, plan, access_context)
+    if not authorization.ok:
+        return _error(authorization.error_code or "query_access_denied", authorization.message or "")
     term = _cross_domain_term(plan)
     if not term:
         return {"projects": [], "contracts": [], "licenses": []}
