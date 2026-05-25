@@ -41,3 +41,7 @@ def test_docs_describe_v14_agent_observability_runbook() -> None:
     assert "self-hosted Langfuse" in combined
     assert "Langflow is prototype-only" in combined
     assert "must not be connected to production Legal-MCP data" in combined
+    assert "structured_query" in combined
+    assert "LEGAL_MCP_AI_PROVIDER" in combined
+    assert "External AI clients cannot directly access database tools" in combined
+    assert "normal\ncatalog exposes `agent_query`, `agent_write`, `describe_my_access`, and\n`structured_query`" in combined
