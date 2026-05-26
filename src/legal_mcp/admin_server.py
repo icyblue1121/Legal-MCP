@@ -70,6 +70,13 @@ class LegalMCPAdminRequestHandler(BaseHTTPRequestHandler):
                 return
             self._send_audit_page()
             return
+        if path == "/admin/agent-settings":
+            admin = self._current_admin()
+            if admin is None:
+                self._redirect("/login")
+                return
+            self._send_agent_settings_page()
+            return
         self._send_html(HTTPStatus.NOT_FOUND, self._page("Not Found", "<p>Not found</p>"))
 
     def do_POST(self) -> None:
@@ -110,6 +117,9 @@ class LegalMCPAdminRequestHandler(BaseHTTPRequestHandler):
             return
         if path == "/admin/project-aliases/create":
             self._handle_create_project_alias()
+            return
+        if path == "/admin/agent-settings/update":
+            self._handle_update_agent_settings()
             return
 
         self._send_html(
@@ -355,6 +365,79 @@ class LegalMCPAdminRequestHandler(BaseHTTPRequestHandler):
             conn.close()
         self._redirect("/admin/users")
 
+    def _handle_update_agent_settings(self) -> None:
+        fields = self._read_form_fields()
+        ai_provider = fields.get("ai_provider", "").strip()
+        ai_model = fields.get("ai_model", "").strip()
+        ai_base_url = fields.get("ai_base_url", "").strip() or None
+        ai_api_key = fields.get("ai_api_key", "").strip() or None
+        if ai_provider != "openai_compatible":
+            self._send_form_error(HTTPStatus.BAD_REQUEST, "Invalid AI provider.")
+            return
+        if not ai_model:
+            self._send_form_error(HTTPStatus.BAD_REQUEST, "AI model is required.")
+            return
+        conn = db.connect(self.server.database_path)
+        try:
+            conn.execute(
+                """
+                update agent_settings
+                set ai_provider = ?,
+                    ai_model = ?,
+                    ai_base_url = ?,
+                    ai_api_key = ?,
+                    updated_at = datetime('now')
+                where id = 1
+                """,
+                (ai_provider, ai_model, ai_base_url, ai_api_key),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        self._redirect("/admin/agent-settings")
+
+    def _send_agent_settings_page(self) -> None:
+        conn = db.connect(self.server.database_path)
+        try:
+            row = conn.execute(
+                """
+                select ai_provider, ai_model, ai_base_url, ai_api_key, updated_at
+                from agent_settings
+                where id = 1
+                """
+            ).fetchone()
+        finally:
+            conn.close()
+        settings = dict(row) if row is not None else {
+            "ai_provider": "openai_compatible",
+            "ai_model": "gpt-4.1-mini",
+            "ai_base_url": "",
+            "ai_api_key": "",
+            "updated_at": "",
+        }
+        provider = html.escape(settings["ai_provider"] or "openai_compatible")
+        model = html.escape(settings["ai_model"] or "")
+        base_url = html.escape(settings["ai_base_url"] or "")
+        api_key = html.escape(settings["ai_api_key"] or "")
+        updated_at = html.escape(settings["updated_at"] or "")
+        body = f"""
+        <nav><a href="/admin/users">Users</a> <a href="/admin/audit">Audit</a> <a href="/admin/agent-settings">Agent Settings</a></nav>
+        <h1>Agent Settings</h1>
+        <form method="post" action="/admin/agent-settings/update">
+          <label>AI Provider
+            <select name="ai_provider" required>
+              <option value="openai_compatible" selected>{provider}</option>
+            </select>
+          </label>
+          <label>AI Model <input type="text" name="ai_model" value="{model}" required></label>
+          <label>AI Base URL <input type="url" name="ai_base_url" value="{base_url}"></label>
+          <label>AI API Key <input type="password" name="ai_api_key" value="{api_key}"></label>
+          <button type="submit">Save Agent Settings</button>
+        </form>
+        <p>Updated: {updated_at}</p>
+        """
+        self._send_html(HTTPStatus.OK, self._page("Agent Settings", body))
+
     def log_message(self, format: str, *args: Any) -> None:
         return
 
@@ -572,7 +655,7 @@ class LegalMCPAdminRequestHandler(BaseHTTPRequestHandler):
             for row in alias_rows
         )
         body = f"""
-        <nav><a href="/admin/users">Users</a> <a href="/admin/audit">Audit</a></nav>
+        <nav><a href="/admin/users">Users</a> <a href="/admin/audit">Audit</a> <a href="/admin/agent-settings">Agent Settings</a></nav>
         <h1>Users</h1>
         {message_html}
         <h2>Create User</h2>
@@ -670,7 +753,7 @@ class LegalMCPAdminRequestHandler(BaseHTTPRequestHandler):
             for row in rows
         )
         body = f"""
-        <nav><a href="/admin/users">Users</a> <a href="/admin/audit">Audit</a></nav>
+        <nav><a href="/admin/users">Users</a> <a href="/admin/audit">Audit</a> <a href="/admin/agent-settings">Agent Settings</a></nav>
         <h1>Audit Events</h1>
         <table>
           <thead><tr><th>ID</th><th>Timestamp</th><th>User</th><th>Client</th><th>Tool</th><th>Rationale</th><th>Status</th><th>Error</th><th>Records</th></tr></thead>
