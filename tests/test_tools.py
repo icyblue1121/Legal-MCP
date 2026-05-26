@@ -1416,3 +1416,45 @@ def test_agent_query_uses_server_configured_ai_provider(tmp_path, monkeypatch: p
     assert seen["model"] == "server-model"
     assert result["status"] == "success"
     assert "上海游碧曜网络科技有限公司" in result["answer"]
+
+
+def test_agent_query_mcp_response_does_not_expose_executable_internal_plan(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        project_id = seed_project(conn, code="Mgame", name="失序之地")
+        conn.execute(
+            """
+            insert into licenses (project_id, external_key, license_type, rights_holder)
+            values (?, ?, ?, ?)
+            """,
+            (project_id, "trademark_right", "trademark_right", "上海游碧曜网络科技有限公司"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    for name in (
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "LEGAL_MCP_AI_PROVIDER",
+        "LEGAL_MCP_AI_MODEL",
+        "LEGAL_MCP_AI_BASE_URL",
+        "LEGAL_MCP_AI_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    result = call_tool(
+        "agent_query",
+        {"question": "Mgame 的商标在哪家公司", "rationale": "pytest"},
+        database_path=database_path,
+        audit_path=tmp_path / "audit.jsonl",
+    )
+
+    assert result["status"] == "success"
+    assert "上海游碧曜网络科技有限公司" in result["answer"]
+    assert "result" not in result
+    assert all("plan" not in tool_call for tool_call in result["tool_calls"])

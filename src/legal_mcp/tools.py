@@ -129,7 +129,7 @@ def call_tool(
 
                     ai_provider = provider_from_config(load_agent_config(database_path))
                     thread_id = arguments.get("thread_id")
-                    result = run_agent_query(
+                    graph_result = run_agent_query(
                         question=question,
                         database_path=database_path,
                         audit_path=audit_path,
@@ -137,7 +137,8 @@ def call_tool(
                         thread_id=thread_id if isinstance(thread_id, str) else None,
                         ai_provider=ai_provider,
                     )
-                    _append_graph_result_disclosures(conn, result, disclosures)
+                    _append_graph_result_disclosures(conn, graph_result, disclosures)
+                    result = _client_safe_agent_result(graph_result)
             elif tool_name == "structured_query":
                 query = arguments.get("query")
                 if not isinstance(query, dict):
@@ -188,6 +189,26 @@ def call_tool(
         disclosures,
     )
     return result
+
+
+def _client_safe_agent_result(result: dict[str, Any]) -> dict[str, Any]:
+    safe: dict[str, Any] = {
+        "answer": result.get("answer", ""),
+        "thread_id": result.get("thread_id"),
+        "tool_calls": [
+            {
+                "tool_name": tool_call.get("tool_name"),
+                "reason": tool_call.get("reason"),
+                "status": tool_call.get("status"),
+            }
+            for tool_call in result.get("tool_calls", [])
+            if isinstance(tool_call, dict)
+        ],
+        "status": result.get("status", "success"),
+    }
+    if "error" in result:
+        safe["error"] = result["error"]
+    return safe
 
 
 def _agent_write_proposal(instruction: str) -> dict[str, Any]:

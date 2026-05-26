@@ -226,21 +226,14 @@ def tool_definitions(
     public_agent_only: bool = False,
     internal_debug: bool = False,
 ) -> list[dict[str, Any]]:
-    if public_agent_only:
-        capabilities = [CATALOG["agent_query"]]
-    elif internal_debug:
+    if internal_debug:
         capabilities = [
             capability
             for capability in CATALOG.values()
             if capability.name != "propose_project_update"
         ]
     else:
-        capabilities = [
-            CATALOG["agent_query"],
-            CATALOG["agent_write"],
-            CATALOG["describe_my_access"],
-            CATALOG["structured_query"],
-        ]
+        capabilities = [CATALOG["agent_query"]]
     return [_tool_definition(capability) for capability in capabilities]
 
 
