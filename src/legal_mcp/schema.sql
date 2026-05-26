@@ -5,7 +5,7 @@ create table if not exists schema_version (
 );
 
 insert into schema_version (id, version)
-values (1, 14)
+values (1, 15)
 on conflict(id) do update set
   version = excluded.version,
   updated_at = datetime('now');
@@ -192,6 +192,19 @@ create table if not exists agent_runs (
   error_code text,
   created_at text not null default (datetime('now'))
 );
+
+create table if not exists agent_settings (
+  id integer primary key check (id = 1),
+  ai_provider text not null default 'openai_compatible',
+  ai_model text not null default 'gpt-4.1-mini',
+  ai_base_url text,
+  ai_api_key text,
+  updated_at text not null default (datetime('now'))
+);
+
+insert into agent_settings (id, ai_provider, ai_model)
+values (1, 'openai_compatible', 'gpt-4.1-mini')
+on conflict(id) do nothing;
 
 create index if not exists idx_projects_stage on projects(stage);
 create index if not exists idx_projects_name on projects(name);
