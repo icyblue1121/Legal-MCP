@@ -129,6 +129,12 @@ def authorize_fields(
         params,
     ).fetchall()
 
+    # A grant row with NULL field_name authorizes every field in the domain.
+    # describe_my_access treats NULL the same way; authorize_fields must agree,
+    # otherwise a domain-wide grant would deny every specific field.
+    if any(row["field_name"] is None for row in rows):
+        return FieldAuthorizationDecision(set(requested_fields), {})
+
     granted = {str(row["field_name"]) for row in rows if row["field_name"]}
     allowed = requested_fields & granted
     denied = {

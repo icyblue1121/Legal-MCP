@@ -9,6 +9,16 @@ from legal_mcp.policy import AccessContext
 from legal_mcp.tools import call_tool
 
 
+class _StubPlanner:
+    """Offline stand-in for the server-side AI planner."""
+
+    def __init__(self, content: str) -> None:
+        self.content = content
+
+    def complete(self, messages: list[AIMessage]) -> AIMessage:
+        return AIMessage(role="assistant", content=self.content)
+
+
 def seed_project(conn, *, code: str = "GAME-001", name: str = "Project One") -> int:
     cursor = conn.execute(
         """
@@ -1446,6 +1456,19 @@ def test_agent_query_mcp_response_does_not_expose_executable_internal_plan(
         "LEGAL_MCP_AI_API_KEY",
     ):
         monkeypatch.delenv(name, raising=False)
+
+    # The graph is model-driven; inject a stub planner so the test runs offline.
+    monkeypatch.setattr(
+        "legal_mcp.ai_provider.provider_from_config",
+        lambda _config: _StubPlanner(
+            '{"domain":"license","operation":"search",'
+            '"filters":['
+            '{"field":"project_code","operator":"eq","value":"Mgame"},'
+            '{"field":"license_type","operator":"eq","value":"trademark_right"}'
+            '],'
+            '"return_fields":["license_type","rights_holder"]}'
+        ),
+    )
 
     result = call_tool(
         "agent_query",

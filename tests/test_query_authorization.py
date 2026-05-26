@@ -138,6 +138,50 @@ def test_authorize_license_query_allows_project_identity_filter_without_license_
     assert result.ok
 
 
+def test_domain_wide_null_field_grant_authorizes_specific_field(tmp_path: Path) -> None:
+    # A grant row with NULL field_name means "all fields in the domain".
+    # describe_my_access honors this; authorize_fields must agree so a
+    # domain-wide grant does not deny every specific field (the 1.4.3 bug).
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        user_id = _insert_user(conn, "business@example.com")
+        project_id = _insert_project(conn, "Mgame")
+        _grant_project_access(conn, user_id, project_id)
+        group_id = conn.execute(
+            "insert into user_groups (name) values (?)", ("grp-domain-wide",)
+        ).lastrowid
+        conn.execute(
+            "insert into user_group_memberships (user_id, group_id) values (?, ?)",
+            (user_id, group_id),
+        )
+        conn.execute(
+            """
+            insert into permission_grants
+              (group_id, operation, data_domain, field_name, project_id)
+            values (?, 'read', 'project', NULL, NULL)
+            """,
+            (group_id,),
+        )
+        conn.commit()
+        result = authorize_query_plan(
+            conn,
+            QueryPlan(
+                domain="project",
+                operation="search",
+                filters=[QueryFilter(field="name", operator="eq", value="失序之地")],
+                return_fields=["release_team"],
+                limit=20,
+            ),
+            AccessContext(user_id=user_id, role="business"),
+        )
+    finally:
+        conn.close()
+
+    assert result.ok
+
+
 def test_filter_field_requires_read_permission(tmp_path: Path) -> None:
     conn, context = _seed_user_without_project_field(
         tmp_path,

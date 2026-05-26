@@ -7,7 +7,18 @@ from legal_mcp.identity import ROLE_AUDITOR, ROLE_BUSINESS, ROLE_LEGAL, create_u
 from legal_mcp.policy import AccessContext
 from legal_mcp.query_authorization import authorize_query_plan
 from legal_mcp.query_plan import QueryFilter, QueryPlan
+from legal_mcp.ai_provider import AIMessage
 from legal_mcp.tools import call_tool
+
+
+class _StubPlanner:
+    """Offline stand-in for the server-side AI planner."""
+
+    def __init__(self, content: str) -> None:
+        self.content = content
+
+    def complete(self, messages: list[AIMessage]) -> AIMessage:
+        return AIMessage(role="assistant", content=self.content)
 
 
 def test_audit_log_records_successful_and_failed_tool_calls(tmp_path) -> None:
@@ -317,7 +328,7 @@ def test_denied_query_filter_field_can_be_audited(tmp_path) -> None:
     }
 
 
-def test_agent_query_project_search_records_graph_disclosure(tmp_path) -> None:
+def test_agent_query_project_search_records_graph_disclosure(tmp_path, monkeypatch) -> None:
     database_path = tmp_path / "legal.db"
     db.initialize_database(database_path)
     conn = db.connect(database_path)
@@ -332,6 +343,16 @@ def test_agent_query_project_search_records_graph_disclosure(tmp_path) -> None:
         conn.commit()
     finally:
         conn.close()
+
+    # The graph is model-driven; inject a stub planner so the test runs offline.
+    monkeypatch.setattr(
+        "legal_mcp.ai_provider.provider_from_config",
+        lambda _config: _StubPlanner(
+            '{"domain":"project","operation":"search",'
+            '"filters":[{"field":"legal_bp","operator":"eq","value":"张三"}],'
+            '"return_fields":["project_code","name"]}'
+        ),
+    )
 
     result = call_tool(
         "agent_query",
