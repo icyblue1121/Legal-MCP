@@ -331,10 +331,12 @@ def _model_intent(
         ),
         AIMessage(role="user", content=question),
     ]
-    response = ai_provider.complete(messages)
+    # A server-side AI outage or malformed reply must not break agent_query;
+    # fall back to deterministic planning instead of propagating the error.
     try:
+        response = ai_provider.complete(messages)
         parsed = json.loads(response.content)
-    except json.JSONDecodeError:
+    except Exception:
         return {}
     return parsed if isinstance(parsed, dict) else {}
 
