@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from legal_mcp.agent_router import (
     build_query_plan_from_question,
+    query_plan_from_model_intent,
     route_question,
     validate_agent_decision,
 )
@@ -78,3 +79,35 @@ def test_build_query_plan_for_cross_domain_search() -> None:
     assert plan.domain == "cross_domain"
     assert plan.filters[0].field == "q"
     assert plan.filters[0].value == "张三"
+
+
+def test_query_plan_from_model_intent_accepts_valid_catalog_plan() -> None:
+    plan = query_plan_from_model_intent(
+        {
+            "domain": "license",
+            "operation": "search",
+            "filters": [
+                {"field": "project_code", "operator": "eq", "value": "Mgame"},
+                {"field": "license_type", "operator": "eq", "value": "trademark_right"},
+            ],
+            "return_fields": ["license_type", "rights_holder"],
+            "limit": 20,
+        }
+    )
+
+    assert plan is not None
+    assert plan.domain == "license"
+    assert plan.return_fields == ["license_type", "rights_holder"]
+
+
+def test_query_plan_from_model_intent_rejects_non_json_shape() -> None:
+    plan = query_plan_from_model_intent(
+        {
+            "domain": "license",
+            "operation": "search",
+            "filters": "project_code = Mgame",
+            "return_fields": ["rights_holder"],
+        }
+    )
+
+    assert plan is None

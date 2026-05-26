@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
+from legal_mcp import db
 from legal_mcp.agent_config import AgentConfig, load_agent_config
 
 
@@ -49,3 +54,57 @@ def test_agent_config_reads_ai_provider(monkeypatch) -> None:
     assert config.ai_provider == "openai_compatible"
     assert config.ai_base_url == "http://127.0.0.1:11434/v1"
     assert config.ai_model == "qwen-local"
+
+
+def test_load_agent_config_reads_database_settings_when_env_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        conn.execute(
+            """
+            update agent_settings
+            set ai_provider = ?, ai_model = ?, ai_base_url = ?, ai_api_key = ?
+            where id = 1
+            """,
+            ("openai_compatible", "gpt-4.1", "https://llm.example.test/v1", "stored-key"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    for name in (
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "LEGAL_MCP_AI_PROVIDER",
+        "LEGAL_MCP_AI_MODEL",
+        "LEGAL_MCP_AI_BASE_URL",
+        "LEGAL_MCP_AI_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    config = load_agent_config(database_path=database_path)
+
+    assert config.ai_provider == "openai_compatible"
+    assert config.ai_model == "gpt-4.1"
+    assert config.ai_base_url == "https://llm.example.test/v1"
+    assert config.ai_api_key == "stored-key"
+
+
+def test_load_agent_config_env_overrides_database_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        conn.execute("update agent_settings set ai_model = ? where id = 1", ("stored-model",))
+        conn.commit()
+    finally:
+        conn.close()
+    monkeypatch.setenv("LEGAL_MCP_AI_MODEL", "env-model")
+
+    config = load_agent_config(database_path=database_path)
+
+    assert config.ai_model == "env-model"

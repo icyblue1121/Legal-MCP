@@ -692,3 +692,60 @@ def test_audit_page_shows_only_recent_events(tmp_path: Path) -> None:
     assert response.status == 200
     assert "recent-tool-99" in body
     assert "overflow-old" not in body
+
+
+def test_admin_agent_settings_page_renders_current_model(tmp_path: Path) -> None:
+    database_path = tmp_path / "legal.db"
+    _database_with_admin_and_project(database_path)
+    conn = db.connect(database_path)
+    try:
+        conn.execute("update agent_settings set ai_model = ? where id = 1", ("gpt-4.1",))
+        conn.commit()
+    finally:
+        conn.close()
+
+    with _running_admin_server(database_path) as base_url:
+        opener = _logged_in_opener(base_url)
+        with opener.open(f"{base_url}/admin/agent-settings", timeout=5) as response:
+            body = response.read().decode("utf-8")
+
+    assert response.status == 200
+    assert "Agent Settings" in body
+    assert "gpt-4.1" in body
+    assert "/admin/agent-settings/update" in body
+
+
+def test_admin_can_update_agent_settings(tmp_path: Path) -> None:
+    database_path = tmp_path / "legal.db"
+    _database_with_admin_and_project(database_path)
+
+    with _running_admin_server(database_path) as base_url:
+        opener = _logged_in_opener(base_url)
+        request = urllib.request.Request(
+            f"{base_url}/admin/agent-settings/update",
+            data=urllib.parse.urlencode(
+                {
+                    "ai_provider": "openai_compatible",
+                    "ai_model": "gpt-4.1",
+                    "ai_base_url": "https://llm.example.test/v1",
+                    "ai_api_key": "admin-key",
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+        with opener.open(request, timeout=5) as response:
+            assert response.status == 200
+
+    conn = db.connect(database_path)
+    try:
+        row = conn.execute(
+            "select ai_provider, ai_model, ai_base_url, ai_api_key from agent_settings where id = 1"
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row["ai_provider"] == "openai_compatible"
+    assert row["ai_model"] == "gpt-4.1"
+    assert row["ai_base_url"] == "https://llm.example.test/v1"
+    assert row["ai_api_key"] == "admin-key"

@@ -66,7 +66,7 @@ def build_stdio_server_config(
 def build_proxy_server_config(
     *,
     remote_url: str,
-    token: str,
+    api_key: str,
     command: str = SERVER_NAME,
 ) -> dict[str, Any]:
     return {
@@ -76,8 +76,8 @@ def build_proxy_server_config(
             "proxy",
             "--url",
             remote_url,
-            "--token",
-            token,
+            "--api-key",
+            api_key,
         ],
     }
 
@@ -90,14 +90,16 @@ def configure_client(
     audit_path: str | Path = DEFAULT_AUDIT_PATH,
     command: str = SERVER_NAME,
     remote_url: str | None = None,
+    api_key: str | None = None,
     token: str | None = None,
 ) -> Path:
+    resolved_api_key = api_key or token
     if remote_url:
-        if not token:
-            raise ValueError("token is required when remote_url is provided")
+        if not resolved_api_key:
+            raise ValueError("api_key is required when remote_url is provided")
         server_config = build_proxy_server_config(
             remote_url=remote_url,
-            token=token,
+            api_key=resolved_api_key,
             command=command,
         )
     else:

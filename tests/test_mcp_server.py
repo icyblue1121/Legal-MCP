@@ -96,12 +96,7 @@ def test_stdio_server_lists_tools_and_calls_get_project_context(tmp_path) -> Non
 
     responses = decode_messages(process.stdout)
     tools_response = next(response for response in responses if response.get("id") == 2)
-    assert [tool["name"] for tool in tools_response["result"]["tools"]] == [
-        "agent_query",
-        "agent_write",
-        "describe_my_access",
-        "structured_query",
-    ]
+    assert [tool["name"] for tool in tools_response["result"]["tools"]] == ["agent_query"]
 
     call_response = next(response for response in responses if response.get("id") == 3)
     content = json.loads(call_response["result"]["content"][0]["text"])
@@ -152,12 +147,7 @@ def test_stdio_server_supports_jsonl_framing(tmp_path) -> None:
     responses = decode_jsonl_messages(process.stdout)
     assert responses[0]["result"]["serverInfo"]["name"] == "legal-mcp"
     tools_response = next(response for response in responses if response.get("id") == 2)
-    assert [tool["name"] for tool in tools_response["result"]["tools"]] == [
-        "agent_query",
-        "agent_write",
-        "describe_my_access",
-        "structured_query",
-    ]
+    assert [tool["name"] for tool in tools_response["result"]["tools"]] == ["agent_query"]
 
 
 def test_stdio_server_can_expose_only_agent_query_with_env(tmp_path) -> None:

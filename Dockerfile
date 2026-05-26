@@ -14,4 +14,4 @@ RUN mkdir -p /data
 
 EXPOSE 8765
 
-CMD ["sh", "-c", "legal-mcp serve-http --host 0.0.0.0 --port 8765 --db /data/legal.db --audit-log /data/audit.jsonl --token \"$LEGAL_MCP_TOKEN\""]
+CMD ["sh", "-c", "legal-mcp serve-http --host 0.0.0.0 --port 8765 --db /data/legal.db --audit-log /data/audit.jsonl --agent-public-only"]

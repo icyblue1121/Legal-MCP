@@ -8,13 +8,18 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 from legal_mcp import db
-from legal_mcp.agent_observability import build_trace_metadata, langfuse_callbacks
-from legal_mcp.agent_router import build_query_plan_from_question, clarify_result
+from legal_mcp.agent_observability import build_trace_metadata, flush_langfuse, langfuse_callbacks
+from legal_mcp.agent_router import (
+    build_query_plan_from_question,
+    clarify_result,
+    query_plan_from_model_intent,
+)
 from legal_mcp.audit import DEFAULT_AUDIT_PATH
 from legal_mcp.ai_provider import AIMessage, AIProvider
 from legal_mcp.planner import asks_for_access_scope
 from legal_mcp.policy import AccessContext
 from legal_mcp.query_authorization import authorize_query_plan
+from legal_mcp.query_catalog import QueryCatalog, build_query_catalog, catalog_context_for_prompt
 from legal_mcp.query_plan import QueryFilter, QueryPlan, validate_query_plan
 from legal_mcp.search_tools import execute_search_plan
 from legal_mcp.tools_access import describe_my_access
@@ -164,7 +169,11 @@ def _run_graph(
         if structured_plan is not None:
             initial_state["query_type"] = "search"
             initial_state["query_plan"] = structured_plan
-        return graph.invoke(initial_state, config)
+        try:
+            return graph.invoke(initial_state, config)
+        finally:
+            if callbacks:
+                flush_langfuse()
     finally:
         checkpoint_conn.close()
 
@@ -181,7 +190,10 @@ def _build_langgraph(
     ai_provider: AIProvider | None = None,
 ) -> Any:
     workflow = state_graph_cls(AgentState)
-    workflow.add_node("classify_question", lambda state: classify_question(state, ai_provider))
+    workflow.add_node(
+        "classify_question",
+        lambda state: classify_question(state, database_path, ai_provider),
+    )
     workflow.add_node("normalize_query", normalize_query)
     workflow.add_node("build_query_plan", build_query_plan)
     workflow.add_node("validate_plan", validate_plan)
@@ -234,7 +246,7 @@ def _run_linear_graph(
             state["query_type"] = "search"
             state["query_plan"] = structured_plan
         nodes = (
-            ("classify_question", lambda: classify_question(state, ai_provider)),
+            ("classify_question", lambda: classify_question(state, database_path, ai_provider)),
             ("normalize_query", lambda: normalize_query(state)),
             ("build_query_plan", lambda: build_query_plan(state)),
             ("validate_plan", lambda: validate_plan(state)),
@@ -264,40 +276,67 @@ def _run_linear_graph(
 
 def classify_question(
     state: AgentState,
+    database_path: str | Path,
     ai_provider: AIProvider | None = None,
 ) -> dict[str, Any]:
     if state.get("query_plan") is not None:
         return {"query_type": "search"}
-    model_intent = _model_intent(state["question"], ai_provider)
     if asks_for_access_scope(state["question"]):
-        update: dict[str, Any] = {"query_type": "access"}
-    elif build_query_plan_from_question(state["question"]) is None:
-        update = {"query_type": "clarify"}
+        return {"query_type": "access"}
+
+    catalog = _catalog_for_database(database_path)
+    model_intent = _model_intent(state["question"], ai_provider, catalog)
+    plan = query_plan_from_model_intent(model_intent) if model_intent else None
+    if plan is not None:
+        catalog_validation = catalog.validate_plan(plan)
+        if catalog_validation.ok:
+            return {"query_type": "search", "query_plan": plan, "model_intent": model_intent}
+
+    fallback_plan = build_query_plan_from_question(state["question"])
+    if fallback_plan is None:
+        update: dict[str, Any] = {"query_type": "clarify"}
     else:
-        update = {"query_type": "search"}
+        update = {"query_type": "search", "query_plan": fallback_plan}
     if model_intent:
         update["model_intent"] = model_intent
     return update
 
 
-def _model_intent(question: str, ai_provider: AIProvider | None) -> dict[str, Any]:
+def _catalog_for_database(database_path: str | Path) -> QueryCatalog:
+    conn = db.connect(database_path)
+    try:
+        return build_query_catalog(conn)
+    finally:
+        conn.close()
+
+
+def _model_intent(
+    question: str,
+    ai_provider: AIProvider | None,
+    catalog: QueryCatalog,
+) -> dict[str, Any]:
     if ai_provider is None:
         return {}
     messages = [
         AIMessage(
             role="system",
             content=(
-                "Classify the legal retrieval question into JSON using only domain, "
-                "operation, filters, and return_fields. Domains: project, contract, "
-                "license, cross_domain. Return JSON only."
+                "You are the server-side Legal-MCP query planner. Convert the user question "
+                "to one JSON object with keys domain, operation, filters, return_fields, "
+                "and optional limit. Use only fields and domains in this catalog. Use "
+                "relationship_filter_fields for project-scoped child records. Never output "
+                "SQL, tool names, connection handles, prose, markdown, or extra keys. "
+                f"Catalog: {catalog_context_for_prompt(catalog)}"
             ),
         ),
         AIMessage(role="user", content=question),
     ]
-    response = ai_provider.complete(messages)
+    # A server-side AI outage or malformed reply must not break agent_query;
+    # fall back to deterministic planning instead of propagating the error.
     try:
+        response = ai_provider.complete(messages)
         parsed = json.loads(response.content)
-    except json.JSONDecodeError:
+    except Exception:
         return {}
     return parsed if isinstance(parsed, dict) else {}
 

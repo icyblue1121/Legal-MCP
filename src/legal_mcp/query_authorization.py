@@ -12,6 +12,7 @@ from legal_mcp.query_plan import QueryPlan, validate_query_plan
 PROJECT_IDENTITY_FIELDS = frozenset({"project_code", "name"})
 CONTRACT_IDENTITY_FIELDS = frozenset({"contract_number", "title"})
 LICENSE_IDENTITY_FIELDS = frozenset({"license_type", "identifier"})
+PROJECT_RELATIONSHIP_FILTER_FIELDS = frozenset({"project_code", "name"})
 
 
 @dataclass(frozen=True)
@@ -45,7 +46,16 @@ def authorize_query_plan(
         return _authorize_cross_domain(conn, plan, access_context)
 
     identity_fields = _identity_fields(plan.domain)
-    filter_fields = {query_filter.field for query_filter in plan.filters} - identity_fields
+    relationship_filter_fields = (
+        PROJECT_RELATIONSHIP_FILTER_FIELDS
+        if plan.domain in {"contract", "license", "risk"}
+        else frozenset()
+    )
+    filter_fields = (
+        {query_filter.field for query_filter in plan.filters}
+        - identity_fields
+        - relationship_filter_fields
+    )
     return_fields = set(plan.return_fields) - identity_fields
     project_ids = _authorization_project_ids(conn, access_context)
 

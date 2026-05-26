@@ -59,12 +59,7 @@ def test_handle_tools_list_returns_legal_mcp_tools(tmp_path: Path) -> None:
     )
 
     names = [tool["name"] for tool in response["result"]["tools"]]
-    assert names == [
-        "agent_query",
-        "agent_write",
-        "describe_my_access",
-        "structured_query",
-    ]
+    assert names == ["agent_query"]
 
 
 def test_handle_tools_list_can_expose_internal_debug_tools(tmp_path: Path) -> None:

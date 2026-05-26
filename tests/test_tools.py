@@ -1,6 +1,9 @@
 from datetime import date, timedelta
 
+import pytest
+
 from legal_mcp import db
+from legal_mcp.ai_provider import AIMessage
 from legal_mcp.identity import ROLE_AUDITOR, ROLE_BUSINESS, ROLE_LEGAL, create_user
 from legal_mcp.policy import AccessContext
 from legal_mcp.tools import call_tool
@@ -1345,3 +1348,113 @@ def test_auditor_cannot_call_content_tools(tmp_path) -> None:
         )
 
         assert result["error"]["code"] == "access_denied"
+
+
+def test_agent_query_uses_server_configured_ai_provider(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        project_id = seed_project(conn, code="MGAME", name="失序之地")
+        conn.execute(
+            """
+            insert into licenses (project_id, external_key, license_type, rights_holder)
+            values (?, ?, ?, ?)
+            """,
+            (project_id, "trademark_right", "trademark_right", "上海游碧曜网络科技有限公司"),
+        )
+        conn.execute(
+            "update agent_settings set ai_api_key = ?, ai_model = ? where id = 1",
+            ("server-key", "server-model"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    for name in (
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "LEGAL_MCP_AI_PROVIDER",
+        "LEGAL_MCP_AI_MODEL",
+        "LEGAL_MCP_AI_BASE_URL",
+        "LEGAL_MCP_AI_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    seen: dict[str, object] = {}
+
+    class FakeProvider:
+        def __init__(self, *, api_key: str, model: str, base_url: str | None = None) -> None:
+            seen["api_key"] = api_key
+            seen["model"] = model
+            seen["base_url"] = base_url
+
+        def complete(self, messages: list[AIMessage]) -> AIMessage:
+            return AIMessage(
+                role="assistant",
+                content=(
+                    '{"domain":"license","operation":"search",'
+                    '"filters":['
+                    '{"field":"project_code","operator":"eq","value":"MGAME"},'
+                    '{"field":"license_type","operator":"eq","value":"trademark_right"}'
+                    '],'
+                    '"return_fields":["license_type","rights_holder"],'
+                    '"limit":20}'
+                ),
+            )
+
+    monkeypatch.setattr("legal_mcp.ai_provider.OpenAICompatibleProvider", FakeProvider)
+
+    result = call_tool(
+        "agent_query",
+        {"question": "MGAME 商标登记主体是哪家公司", "rationale": "pytest"},
+        database_path=database_path,
+        audit_path=tmp_path / "audit.jsonl",
+    )
+
+    assert seen["api_key"] == "server-key"
+    assert seen["model"] == "server-model"
+    assert result["status"] == "success"
+    assert "上海游碧曜网络科技有限公司" in result["answer"]
+
+
+def test_agent_query_mcp_response_does_not_expose_executable_internal_plan(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        project_id = seed_project(conn, code="Mgame", name="失序之地")
+        conn.execute(
+            """
+            insert into licenses (project_id, external_key, license_type, rights_holder)
+            values (?, ?, ?, ?)
+            """,
+            (project_id, "trademark_right", "trademark_right", "上海游碧曜网络科技有限公司"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    for name in (
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "LEGAL_MCP_AI_PROVIDER",
+        "LEGAL_MCP_AI_MODEL",
+        "LEGAL_MCP_AI_BASE_URL",
+        "LEGAL_MCP_AI_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    result = call_tool(
+        "agent_query",
+        {"question": "Mgame 的商标在哪家公司", "rationale": "pytest"},
+        database_path=database_path,
+        audit_path=tmp_path / "audit.jsonl",
+    )
+
+    assert result["status"] == "success"
+    assert "上海游碧曜网络科技有限公司" in result["answer"]
+    assert "result" not in result
+    assert all("plan" not in tool_call for tool_call in result["tool_calls"])

@@ -14,6 +14,13 @@ PROJECT_COLUMNS = {field: f"projects.{field}" for field in PROJECT_FIELDS}
 CONTRACT_COLUMNS = {field: f"contracts.{field}" for field in CONTRACT_FIELDS}
 LICENSE_COLUMNS = {field: f"licenses.{field}" for field in LICENSE_FIELDS}
 
+PROJECT_IDENTITY_COLUMNS = {
+    "project_code": "projects.project_code collate nocase",
+    "name": "projects.name collate nocase",
+}
+CONTRACT_FILTER_COLUMNS = {**CONTRACT_COLUMNS, **PROJECT_IDENTITY_COLUMNS}
+LICENSE_FILTER_COLUMNS = {**LICENSE_COLUMNS, **PROJECT_IDENTITY_COLUMNS}
+
 
 def search_projects(
     conn: sqlite3.Connection,
@@ -48,7 +55,7 @@ def search_contracts(
     authorization = authorize_query_plan(conn, plan, access_context)
     if not authorization.ok:
         return _error(authorization.error_code or "query_access_denied", authorization.message or "")
-    where, params = _where_for_plan(plan, CONTRACT_COLUMNS)
+    where, params = _where_for_plan(plan, CONTRACT_FILTER_COLUMNS)
     where.extend(_visible_project_filter(conn, access_context, "contracts.project_id", params))
     rows = conn.execute(
         f"""
@@ -73,7 +80,7 @@ def search_licenses(
     authorization = authorize_query_plan(conn, plan, access_context)
     if not authorization.ok:
         return _error(authorization.error_code or "query_access_denied", authorization.message or "")
-    where, params = _where_for_plan(plan, LICENSE_COLUMNS)
+    where, params = _where_for_plan(plan, LICENSE_FILTER_COLUMNS)
     where.extend(_visible_project_filter(conn, access_context, "licenses.project_id", params))
     rows = conn.execute(
         f"""

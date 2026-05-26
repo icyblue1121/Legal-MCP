@@ -118,6 +118,25 @@ For OpenAI-compatible, intranet, or future local model routing, configure
 `LEGAL_MCP_AI_API_KEY`. These settings belong to the server-side workflow; MCP
 callers do not provide model tools or database handles.
 
+Legal-MCP v1.4.2 fixes natural-language retrieval in `agent_query`.
+The production MCP tool surface exposes only `agent_query`; clients submit a
+question and wait for the final server result. The server builds a query catalog
+from registered SQLite domains and fields, asks the server-configured LangGraph
+AI provider to produce a constrained JSON `QueryPlan`, then validates,
+authorizes, and executes that plan internally. Clients do not receive database
+tools, model tools, SQL access, `structured_query`, or executable internal plans.
+
+This means natural-language questions can target any registered and authorized
+database field, rather than only questions that match deterministic regular
+expressions. If a question references unknown fields, ambiguous fields, or
+unauthorized fields, Legal-MCP clarifies or returns an access error instead of
+guessing.
+
+Admins can configure the server-side LangGraph AI agent at
+`/admin/agent-settings`. Deployment environment variables such as
+`LEGAL_MCP_AI_MODEL`, `LEGAL_MCP_AI_BASE_URL`, and `LEGAL_MCP_AI_API_KEY`
+override stored admin settings.
+
 For tracing, use self-hosted Langfuse only. `LANGFUSE_PUBLIC_KEY`,
 `LANGFUSE_SECRET_KEY`, and `LANGFUSE_BASE_URL=http://127.0.0.1:3000` enable
 local callbacks; Langfuse Cloud is not the production default.
@@ -209,29 +228,30 @@ docker compose -f docker-compose.yml -f docker-compose.langfuse.yml up -d
 Operator:
 
 ```sh
-export LEGAL_MCP_TOKEN="replace-with-a-long-random-token"
 legal-mcp import project-ledger.xlsx --db /data/legal.db
 legal-mcp serve-http \
   --host 0.0.0.0 \
   --port 8765 \
   --db /data/legal.db \
   --audit-log /data/audit.jsonl \
-  --token "$LEGAL_MCP_TOKEN"
+  --agent-public-only
 ```
 
 Team member:
 
 ```sh
+export LEGAL_MCP_API_KEY="lmcp_replace_with_the_user_api_key"
+
 legal-mcp setup \
   --client codex \
   --remote-url http://legal-mcp.internal:8765/mcp \
-  --token "$LEGAL_MCP_TOKEN"
+  --api-key "$LEGAL_MCP_API_KEY"
 ```
 
 Clients that use the generated stdio config will run:
 
 ```sh
-legal-mcp proxy --url http://legal-mcp.internal:8765/mcp --token "$LEGAL_MCP_TOKEN"
+legal-mcp proxy --url http://legal-mcp.internal:8765/mcp --api-key "$LEGAL_MCP_API_KEY"
 ```
 
 Claude Code users should choose `claude-code` instead of `claude`:
@@ -240,7 +260,7 @@ Claude Code users should choose `claude-code` instead of `claude`:
 legal-mcp setup \
   --client claude-code \
   --remote-url http://legal-mcp.internal:8765/mcp \
-  --token "$LEGAL_MCP_TOKEN"
+  --api-key "$LEGAL_MCP_API_KEY"
 
 claude mcp list
 ```
@@ -277,7 +297,7 @@ export LEGAL_MCP_API_KEY="lmcp_replace_with_the_user_api_key"
 legal-mcp setup \
   --client codex \
   --remote-url http://legal-mcp.internal:8765/mcp \
-  --token "$LEGAL_MCP_API_KEY"
+  --api-key "$LEGAL_MCP_API_KEY"
 ```
 
 Keep the Admin Web UI on `127.0.0.1` and manage it through an SSH tunnel, or

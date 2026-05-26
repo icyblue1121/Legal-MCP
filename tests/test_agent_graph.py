@@ -11,12 +11,19 @@ def _database_with_project(path: Path) -> None:
     db.initialize_database(path)
     conn = db.connect(path)
     try:
-        conn.execute(
+        project_id = conn.execute(
             """
             insert into projects (project_code, name, stage, legal_bp, website)
             values (?, ?, ?, ?, ?)
             """,
             ("MGAME", "失序之地", "测试中", "张三", "https://example.test"),
+        ).lastrowid
+        conn.execute(
+            """
+            insert into licenses (project_id, external_key, license_type, rights_holder)
+            values (?, ?, ?, ?)
+            """,
+            (project_id, "trademark_right", "trademark_right", "上海游碧曜网络科技有限公司"),
         )
         conn.commit()
     finally:
@@ -167,4 +174,67 @@ def test_agent_graph_can_use_ai_provider_without_exposing_tools(tmp_path: Path) 
     assert provider.messages
     serialized_messages = "\n".join(message.content for message in provider.messages)
     assert "database handle" not in serialized_messages
+
+
+class FakeCatalogAIProvider:
+    def __init__(self) -> None:
+        self.messages: list[AIMessage] = []
+
+    def complete(self, messages: list[AIMessage]) -> AIMessage:
+        self.messages = messages
+        return AIMessage(
+            role="assistant",
+            content=(
+                '{"domain":"license","operation":"search",'
+                '"filters":['
+                '{"field":"project_code","operator":"eq","value":"MGAME"},'
+                '{"field":"license_type","operator":"eq","value":"trademark_right"}'
+                '],'
+                '"return_fields":["license_type","rights_holder"],'
+                '"limit":20}'
+            ),
+        )
+
+
+def test_agent_graph_uses_server_ai_catalog_plan_for_non_regex_question(tmp_path: Path) -> None:
+    database_path = tmp_path / "legal.db"
+    _database_with_project(database_path)
+    provider = FakeCatalogAIProvider()
+
+    result = run_agent_query(
+        question="请告诉我 MGAME 商标登记主体是哪家公司",
+        database_path=database_path,
+        checkpoint_path=tmp_path / "agent-checkpoints.sqlite",
+        audit_path=tmp_path / "audit.jsonl",
+        ai_provider=provider,
+    )
+
+    assert result["status"] == "success"
+    assert result["tool_calls"][0]["tool_name"] == "license/search"
+    assert "上海游碧曜网络科技有限公司" in result["answer"]
+    serialized_messages = "\n".join(message.content for message in provider.messages)
+    assert "rights_holder" in serialized_messages
     assert "get_project_fields" not in serialized_messages
+
+
+def test_agent_graph_answers_project_trademark_rights_holder_without_client_tool_access(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "legal.db"
+    _database_with_project(database_path)
+
+    result = run_agent_query(
+        question="Mgame 的商标在哪家公司",
+        database_path=database_path,
+        checkpoint_path=tmp_path / "agent-checkpoints.sqlite",
+        audit_path=tmp_path / "audit.jsonl",
+        thread_id="pytest-trademark-thread",
+    )
+
+    assert result["status"] == "success"
+    assert result["tool_calls"][0]["tool_name"] == "license/search"
+    assert result["tool_calls"][0]["plan"]["filters"] == [
+        {"field": "project_code", "operator": "eq", "value": "Mgame"},
+        {"field": "license_type", "operator": "eq", "value": "trademark_right"},
+    ]
+    assert "上海游碧曜网络科技有限公司" in result["answer"]

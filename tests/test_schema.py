@@ -196,7 +196,29 @@ def test_initialize_database_records_schema_version(tmp_path) -> None:
     finally:
         conn.close()
 
-    assert row["version"] == 14
+    assert row["version"] == 15
+
+
+def test_initialize_database_creates_agent_settings(tmp_path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+
+    conn = db.connect(database_path)
+    try:
+        row = conn.execute(
+            """
+            select ai_provider, ai_model, ai_base_url
+            from agent_settings
+            where id = 1
+            """
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row is not None
+    assert row["ai_provider"] == "openai_compatible"
+    assert row["ai_model"] == "gpt-4.1-mini"
+    assert row["ai_base_url"] is None
 
 
 def test_initialize_database_creates_group_permission_and_alias_tables(tmp_path) -> None:

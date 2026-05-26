@@ -37,7 +37,7 @@ def test_build_stdio_server_config_uses_serve_command_and_paths(tmp_path) -> Non
 def test_build_stdio_server_config_can_use_remote_proxy() -> None:
     config = build_proxy_server_config(
         remote_url="http://legal.internal:8765/mcp",
-        token="secret-token",
+        api_key="lmcp_user-api-key",
         command="legal-mcp",
     )
 
@@ -48,8 +48,8 @@ def test_build_stdio_server_config_can_use_remote_proxy() -> None:
             "proxy",
             "--url",
             "http://legal.internal:8765/mcp",
-            "--token",
-            "secret-token",
+            "--api-key",
+            "lmcp_user-api-key",
         ],
     }
 
@@ -130,7 +130,7 @@ def test_configure_claude_code_uses_claude_mcp_user_scope(monkeypatch) -> None:
     config_path = configure_client(
         "claude-code",
         remote_url="http://10.236.36.71:8765/mcp",
-        token="secret-token",
+        api_key="lmcp_user-api-key",
     )
 
     assert str(config_path).endswith(".claude.json")
@@ -150,8 +150,8 @@ def test_configure_claude_code_uses_claude_mcp_user_scope(monkeypatch) -> None:
         "proxy",
         "--url",
         "http://10.236.36.71:8765/mcp",
-        "--token",
-        "secret-token",
+        "--api-key",
+        "lmcp_user-api-key",
     ]
     assert commands[1][1]["check"] is True
 

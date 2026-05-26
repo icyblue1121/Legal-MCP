@@ -31,10 +31,36 @@ def route_question(question: str) -> AgentToolDecision:
     )
 
 
+def _project_scoped_license_plan(
+    project: str,
+    *,
+    license_type: str,
+    return_fields: list[str],
+) -> QueryPlan:
+    return QueryPlan(
+        domain="license",
+        operation="search",
+        filters=[
+            QueryFilter(field="project_code", operator="eq", value=project),
+            QueryFilter(field="license_type", operator="eq", value=license_type),
+        ],
+        return_fields=["license_type", *return_fields],
+        limit=20,
+    )
+
+
 def build_query_plan_from_question(question: str) -> QueryPlan | None:
     normalized = question.strip().replace(" ", "")
     if not normalized or "所有项目资料" in normalized:
         return None
+
+    match = re.search(r"(.+?)的商标(?:在哪家公司|权利人是谁|权利人是什么)[？?]?$", normalized, re.IGNORECASE)
+    if match:
+        return _project_scoped_license_plan(
+            match.group(1),
+            license_type="trademark_right",
+            return_fields=["rights_holder"],
+        )
 
     match = re.search(r"(.+?)是哪些项目的法务BP", normalized, re.IGNORECASE)
     if match:
@@ -98,6 +124,37 @@ def build_query_plan_from_question(question: str) -> QueryPlan | None:
         )
 
     return None
+
+
+def query_plan_from_model_intent(intent: dict[str, Any]) -> QueryPlan | None:
+    domain = intent.get("domain")
+    operation = intent.get("operation")
+    raw_filters = intent.get("filters")
+    raw_return_fields = intent.get("return_fields")
+    raw_limit = intent.get("limit", 20)
+    if not isinstance(domain, str) or not isinstance(operation, str):
+        return None
+    if not isinstance(raw_filters, list) or not isinstance(raw_return_fields, list):
+        return None
+    if not all(isinstance(field, str) for field in raw_return_fields):
+        return None
+    limit = raw_limit if isinstance(raw_limit, int) else 20
+    filters: list[QueryFilter] = []
+    for raw_filter in raw_filters:
+        if not isinstance(raw_filter, dict):
+            return None
+        field = raw_filter.get("field")
+        operator = raw_filter.get("operator")
+        if not isinstance(field, str) or not isinstance(operator, str):
+            return None
+        filters.append(QueryFilter(field=field, operator=operator, value=raw_filter.get("value")))
+    return QueryPlan(
+        domain=domain,
+        operation=operation,
+        filters=filters,
+        return_fields=raw_return_fields,
+        limit=limit,
+    )
 
 
 def validate_agent_decision(decision: AgentToolDecision) -> dict[str, Any]:

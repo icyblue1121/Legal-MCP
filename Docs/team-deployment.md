@@ -24,19 +24,13 @@ AI desktop client
 
 1. Choose an intranet host reachable by team members.
 
-2. Create a long random token:
-
-```sh
-export LEGAL_MCP_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
-```
-
-3. Import the current legal project ledger:
+2. Import the current legal project ledger:
 
 ```sh
 legal-mcp import project-ledger.xlsx --db /data/legal.db
 ```
 
-4. Start the HTTP MCP server:
+3. Start the HTTP MCP server with only `agent_query` exposed to clients:
 
 ```sh
 legal-mcp serve-http \
@@ -44,10 +38,10 @@ legal-mcp serve-http \
   --port 8765 \
   --db /data/legal.db \
   --audit-log /data/audit.jsonl \
-  --token "$LEGAL_MCP_TOKEN"
+  --agent-public-only
 ```
 
-5. Check health:
+4. Check health:
 
 ```sh
 legal-mcp doctor --remote-url http://legal-mcp.internal:8765/mcp
@@ -63,7 +57,6 @@ ok: remote HTTP server is healthy: http://legal-mcp.internal:8765/mcp
 ## Docker Compose
 
 ```sh
-export LEGAL_MCP_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
 mkdir -p data
 legal-mcp import project-ledger.xlsx --db data/legal.db
 docker compose up --build
@@ -124,13 +117,13 @@ export LEGAL_MCP_API_KEY="lmcp_replace_with_the_user_api_key"
 legal-mcp setup \
   --client codex \
   --remote-url http://legal-mcp.internal:8765/mcp \
-  --token "$LEGAL_MCP_API_KEY"
+  --api-key "$LEGAL_MCP_API_KEY"
 ```
 
 Equivalent one-line form:
 
 ```sh
-legal-mcp setup --client codex --remote-url http://legal-mcp.internal:8765/mcp --token "$LEGAL_MCP_API_KEY"
+legal-mcp setup --client codex --remote-url http://legal-mcp.internal:8765/mcp --api-key "$LEGAL_MCP_API_KEY"
 ```
 
 Cursor:
@@ -139,7 +132,7 @@ Cursor:
 legal-mcp setup \
   --client cursor \
   --remote-url http://legal-mcp.internal:8765/mcp \
-  --token "$LEGAL_MCP_API_KEY"
+  --api-key "$LEGAL_MCP_API_KEY"
 ```
 
 Generic stdio config:
@@ -148,17 +141,17 @@ Generic stdio config:
 legal-mcp setup \
   --client generic \
   --remote-url http://legal-mcp.internal:8765/mcp \
-  --token "$LEGAL_MCP_API_KEY"
+  --api-key "$LEGAL_MCP_API_KEY"
 ```
 
 The generated stdio entry runs:
 
 ```sh
-legal-mcp proxy --url http://legal-mcp.internal:8765/mcp --token "$LEGAL_MCP_API_KEY"
+legal-mcp proxy --url http://legal-mcp.internal:8765/mcp --api-key "$LEGAL_MCP_API_KEY"
 ```
 
-For v1.1 shared-token pilots only, use `LEGAL_MCP_TOKEN` instead. In v1.2,
-using the shared token bypasses named-user attribution and project grants.
+For v1.1 shared-token pilots only, use `--legacy-token` on the server. In v1.2
+and later, shared tokens bypass named-user attribution and project grants.
 
 ## v1.3 Deployment Notes
 
@@ -189,7 +182,6 @@ legal-mcp serve-http \
   --port 8765 \
   --db /data/legal.db \
   --audit-log /data/audit.jsonl \
-  --token "$LEGAL_MCP_API_KEY" \
   --agent-public-only
 ```
 
@@ -240,8 +232,7 @@ result status, and disclosure decision.
 
 ## Operational rules
 
-- Rotate `LEGAL_MCP_TOKEN` if a team member leaves a v1.1 pilot. For v1.2,
-  revoke that user's API key and remove project grants.
+- Revoke a user's API key and remove project grants when that user leaves.
 - Keep `/data/legal.db` and `/data/audit.jsonl` on an encrypted disk or protected intranet server.
 - The v1.1 HTTP server is intended for trusted intranet use.
 - Use a reverse proxy with TLS before exposing the service beyond a trusted internal network.

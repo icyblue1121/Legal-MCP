@@ -7,7 +7,7 @@ def test_dockerfile_runs_http_server() -> None:
     assert "FROM python:3.11-slim" in content
     assert '".[agent]"' in content
     assert "serve-http" in content
-    assert "LEGAL_MCP_TOKEN" in content
+    assert "--agent-public-only" in content
 
 
 def test_compose_mounts_data_and_sets_http_command() -> None:
@@ -19,8 +19,9 @@ def test_compose_mounts_data_and_sets_http_command() -> None:
     assert "build:" not in content
     assert "8765:8765" in content
     assert "./data:/data" in content
-    assert "LEGAL_MCP_TOKEN" in content
+    assert "LEGAL_MCP_AGENT_PUBLIC_ONLY" in content
     assert "serve-http" in content
+    assert "--agent-public-only" in content
 
 
 def test_build_compose_builds_reusable_image() -> None:

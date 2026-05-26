@@ -71,7 +71,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_AUDIT_PATH,
         help="Audit log JSONL path",
     )
-    serve_http_parser.add_argument("--token", required=True, help="Bearer token required by clients")
+    serve_http_parser.add_argument(
+        "--legacy-token",
+        dest="legacy_token",
+        help="Optional shared bearer token for legacy clients. Prefer per-user API keys.",
+    )
+    serve_http_parser.add_argument(
+        "--token",
+        dest="legacy_token",
+        help=argparse.SUPPRESS,
+    )
     serve_http_parser.add_argument(
         "--update-check-url",
         help="Optional JSON endpoint for non-blocking startup update notices.",
@@ -112,7 +121,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     proxy_parser = subparsers.add_parser("proxy", help="Proxy local stdio MCP to a remote HTTP MCP server")
     proxy_parser.add_argument("--url", required=True, help="Remote HTTP MCP endpoint URL")
-    proxy_parser.add_argument("--token", required=True, help="Bearer token for remote HTTP MCP server")
+    proxy_parser.add_argument("--api-key", dest="api_key", help="Per-user API key for remote HTTP MCP server")
+    proxy_parser.add_argument("--token", dest="api_key", help=argparse.SUPPRESS)
     proxy_parser.add_argument("--timeout", type=float, default=30)
     setup_parser = subparsers.add_parser("setup", help="Configure a local MCP client")
     setup_parser.add_argument(
@@ -140,7 +150,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Command clients should run to start Legal-MCP",
     )
     setup_parser.add_argument("--remote-url", help="Remote HTTP MCP endpoint for team proxy mode")
-    setup_parser.add_argument("--token", help="Bearer token for remote HTTP MCP endpoint")
+    setup_parser.add_argument("--api-key", dest="api_key", help="Per-user API key for remote HTTP MCP endpoint")
+    setup_parser.add_argument("--token", dest="api_key", help=argparse.SUPPRESS)
     doctor_parser = subparsers.add_parser("doctor", help="Validate local install health")
     doctor_parser.add_argument(
         "--db",
@@ -181,7 +192,7 @@ def main(argv: list[str] | None = None) -> int:
             port=args.port,
             database_path=args.db,
             audit_path=args.audit_log,
-            bearer_token=args.token,
+            bearer_token=args.legacy_token,
             allowed_origins=tuple(args.allowed_origins),
             update_check_url=args.update_check_url,
             public_agent_only=True if args.agent_public_only else None,
@@ -225,7 +236,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "proxy":
         from legal_mcp.proxy import proxy_stdio
 
-        proxy_stdio(url=args.url, token=args.token, timeout=args.timeout)
+        if not args.api_key:
+            print("Error: --api-key is required", file=sys.stderr)
+            return 2
+        proxy_stdio(url=args.url, token=args.api_key, timeout=args.timeout)
         return 0
     if args.command == "setup":
         from legal_mcp.setup_wizard import configure_client
@@ -238,7 +252,7 @@ def main(argv: list[str] | None = None) -> int:
             audit_path=args.audit_log,
             command=args.server_command,
             remote_url=args.remote_url,
-            token=args.token,
+            api_key=args.api_key,
         )
         print(f"Configured {client}: {config_path}")
         print(f"Database ready: {args.db}")

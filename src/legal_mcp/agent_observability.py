@@ -20,6 +20,14 @@ def langfuse_callbacks() -> list[Any]:
     return [CallbackHandler()]
 
 
+def flush_langfuse() -> None:
+    try:
+        from langfuse import get_client
+    except ModuleNotFoundError:
+        return
+    get_client().flush()
+
+
 def build_trace_metadata(
     *,
     thread_id: str,

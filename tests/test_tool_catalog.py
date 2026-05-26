@@ -67,15 +67,18 @@ def test_public_catalog_can_expose_only_agent_query() -> None:
     assert names == ["agent_query"]
 
 
-def test_public_catalog_exposes_only_graph_entry_tools() -> None:
+def test_production_tool_definitions_expose_only_agent_query() -> None:
     names = [tool["name"] for tool in tool_definitions(public_agent_only=False)]
 
-    assert names == [
-        "agent_query",
-        "agent_write",
-        "describe_my_access",
-        "structured_query",
-    ]
+    assert names == ["agent_query"]
+
+
+def test_internal_debug_tool_definitions_keep_structured_query_available() -> None:
+    names = [tool["name"] for tool in tool_definitions(internal_debug=True)]
+
+    assert "agent_query" in names
+    assert "structured_query" in names
+    assert "list_project_licenses" in names
 
 
 def test_internal_catalog_keeps_legacy_tools_for_tests_only() -> None:

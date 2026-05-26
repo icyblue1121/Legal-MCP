@@ -264,3 +264,44 @@ def test_execute_search_plan_dispatches_by_domain(tmp_path: Path) -> None:
         conn.close()
 
     assert result == {"projects": [{"project_code": "Mgame"}]}
+
+
+def test_search_licenses_can_filter_by_project_code(tmp_path: Path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        project_id = _insert_project(conn, "Mgame", "失序之地", "张三")
+        conn.execute(
+            """
+            insert into licenses (project_id, external_key, license_type, rights_holder)
+            values (?, ?, ?, ?)
+            """,
+            (project_id, "trademark_right", "trademark_right", "上海游碧曜网络科技有限公司"),
+        )
+        conn.commit()
+        result = execute_search_plan(
+            conn,
+            QueryPlan(
+                domain="license",
+                operation="search",
+                filters=[
+                    QueryFilter(field="project_code", operator="eq", value="Mgame"),
+                    QueryFilter(field="license_type", operator="eq", value="trademark_right"),
+                ],
+                return_fields=["license_type", "rights_holder"],
+                limit=20,
+            ),
+            access_context=None,
+        )
+    finally:
+        conn.close()
+
+    assert result == {
+        "licenses": [
+            {
+                "license_type": "trademark_right",
+                "rights_holder": "上海游碧曜网络科技有限公司",
+            }
+        ]
+    }

@@ -25,7 +25,7 @@ class LegalMCPHTTPServer(ThreadingHTTPServer):
         *,
         database_path: str | Path,
         audit_path: str | Path,
-        bearer_token: str,
+        bearer_token: str | None,
         allowed_origins: tuple[str, ...],
         public_agent_only: bool | None = None,
     ) -> None:
@@ -35,7 +35,7 @@ class LegalMCPHTTPServer(ThreadingHTTPServer):
         self.bearer_token = bearer_token
         self.allowed_origins = allowed_origins
         self.public_agent_only = (
-            load_agent_config().public_agent_only
+            load_agent_config(database_path).public_agent_only
             if public_agent_only is None
             else public_agent_only
         )
@@ -47,6 +47,9 @@ class LegalMCPHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path == "/healthz":
             self._handle_healthz()
+            return
+        if self.path == "/mcp":
+            self._handle_mcp_probe()
             return
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
@@ -102,6 +105,17 @@ class LegalMCPHTTPRequestHandler(BaseHTTPRequestHandler):
                 {"service": "legal-mcp", "database": "unavailable"},
             )
 
+    def _handle_mcp_probe(self) -> None:
+        self._send_json(
+            HTTPStatus.OK,
+            {
+                "service": "legal-mcp",
+                "transport": "json-rpc-over-http",
+                "endpoint": "/mcp",
+                "methods": ["POST"],
+            },
+        )
+
     def _resolve_access_context(self) -> AccessContext | None:
         authorization = self.headers.get("Authorization")
         if authorization is None:
@@ -110,7 +124,7 @@ class LegalMCPHTTPRequestHandler(BaseHTTPRequestHandler):
         scheme, _, token = authorization.partition(" ")
         if scheme != "Bearer" or not token:
             return None
-        if token == self.server.bearer_token:
+        if self.server.bearer_token and token == self.server.bearer_token:
             return AccessContext.legacy()
 
         conn = db.connect(self.server.database_path)
@@ -146,12 +160,10 @@ def build_http_server(
     port: int,
     database_path: str | Path,
     audit_path: str | Path,
-    bearer_token: str,
+    bearer_token: str | None = None,
     allowed_origins: tuple[str, ...],
     public_agent_only: bool | None = None,
 ) -> LegalMCPHTTPServer:
-    if not bearer_token:
-        raise ValueError("bearer token is required")
     return LegalMCPHTTPServer(
         (host, port),
         LegalMCPHTTPRequestHandler,
@@ -169,7 +181,7 @@ def serve_http(
     port: int,
     database_path: str | Path,
     audit_path: str | Path,
-    bearer_token: str,
+    bearer_token: str | None = None,
     allowed_origins: tuple[str, ...],
     update_check_url: str | None = None,
     public_agent_only: bool | None = None,

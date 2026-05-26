@@ -85,6 +85,21 @@ def test_healthz_reports_ready(http_service) -> None:
     assert payload == {"service": "legal-mcp", "database": "ready"}
 
 
+def test_mcp_get_probe_reports_http_transport(http_service) -> None:
+    _, base_url = http_service
+
+    with _OPENER.open(f"{base_url}/mcp", timeout=5) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+
+    assert response.status == 200
+    assert payload == {
+        "service": "legal-mcp",
+        "transport": "json-rpc-over-http",
+        "endpoint": "/mcp",
+        "methods": ["POST"],
+    }
+
+
 def test_http_mcp_tools_call_returns_project_context(http_service) -> None:
     _, base_url = http_service
 
@@ -406,12 +421,7 @@ def test_http_mcp_allows_absent_origin_for_non_browser_clients(http_service) -> 
     )
 
     assert status == 200
-    assert [tool["name"] for tool in payload["result"]["tools"]] == [
-        "agent_query",
-        "agent_write",
-        "describe_my_access",
-        "structured_query",
-    ]
+    assert [tool["name"] for tool in payload["result"]["tools"]] == ["agent_query"]
 
 
 def test_http_mcp_can_expose_only_agent_query_with_env(

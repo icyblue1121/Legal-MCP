@@ -53,6 +53,18 @@ class OpenAICompatibleProvider:
         return AIMessage(role="assistant", content=str(response.content))
 
 
+def provider_from_config(config: AgentConfig) -> AIProvider | None:
+    if not config.ai_api_key:
+        return None
+    if config.ai_provider != "openai_compatible":
+        return None
+    return OpenAICompatibleProvider(
+        api_key=config.ai_api_key,
+        model=config.ai_model,
+        base_url=config.ai_base_url,
+    )
+
+
 def build_ai_provider(config: AgentConfig) -> AIProvider:
     if config.ai_provider == "none" or not config.ai_api_key:
         return NoopAIProvider()
