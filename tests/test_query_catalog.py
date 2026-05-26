@@ -61,6 +61,42 @@ def test_query_catalog_validates_child_project_identity_filter(tmp_path: Path) -
     assert catalog.validate_plan(plan).ok
 
 
+def test_query_catalog_registers_cross_domain_and_drops_risk(tmp_path: Path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        catalog = build_query_catalog(conn)
+    finally:
+        conn.close()
+
+    assert "cross_domain" in catalog.domains
+    assert "risk" not in catalog.domains
+    cross = QueryPlan(
+        domain="cross_domain",
+        operation="search",
+        filters=[QueryFilter(field="q", operator="contains", value="张三")],
+        return_fields=["project_code", "name"],
+        limit=20,
+    )
+    assert catalog.validate_plan(cross).ok
+
+
+def test_catalog_prompt_exposes_operations_operators_and_filter_shape(tmp_path: Path) -> None:
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        context = catalog_context_for_prompt(build_query_catalog(conn))
+    finally:
+        conn.close()
+
+    assert "supported_operations" in context
+    assert "supported_operators" in context
+    assert "filter_shape" in context
+    assert "cross_domain" in context
+
+
 def test_query_catalog_rejects_unregistered_domain(tmp_path: Path) -> None:
     database_path = tmp_path / "legal.db"
     db.initialize_database(database_path)

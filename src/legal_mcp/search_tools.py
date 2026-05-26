@@ -132,14 +132,19 @@ def execute_search_plan(
     *,
     access_context: AccessContext | None,
 ) -> dict[str, Any]:
-    if plan.domain == "project":
-        return search_projects(conn, plan, access_context=access_context)
-    if plan.domain == "contract":
-        return search_contracts(conn, plan, access_context=access_context)
-    if plan.domain == "license":
-        return search_licenses(conn, plan, access_context=access_context)
-    if plan.domain == "cross_domain":
-        return search_cross_domain(conn, plan, access_context=access_context)
+    # Defense in depth: an unknown field/operator that slipped past validation
+    # becomes a structured error instead of an uncaught exception.
+    try:
+        if plan.domain == "project":
+            return search_projects(conn, plan, access_context=access_context)
+        if plan.domain == "contract":
+            return search_contracts(conn, plan, access_context=access_context)
+        if plan.domain == "license":
+            return search_licenses(conn, plan, access_context=access_context)
+        if plan.domain == "cross_domain":
+            return search_cross_domain(conn, plan, access_context=access_context)
+    except ValueError as exc:
+        return _error("unsupported_field", str(exc))
     return _error("unsupported_domain", "query domain is not supported")
 
 

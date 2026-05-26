@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, replace
 from typing import Any
 
 from legal_mcp.planner import plan_query
-from legal_mcp.query_plan import QueryFilter, QueryPlan
+from legal_mcp.query_catalog import QueryCatalog
+from legal_mcp.query_plan import SUPPORTED_OPERATIONS, SUPPORTED_OPERATORS, QueryFilter, QueryPlan
 from legal_mcp.tool_catalog import agent_capabilities
 
 
@@ -31,130 +31,96 @@ def route_question(question: str) -> AgentToolDecision:
     )
 
 
-def _project_scoped_license_plan(
-    project: str,
-    *,
-    license_type: str,
-    return_fields: list[str],
-) -> QueryPlan:
-    return QueryPlan(
-        domain="license",
-        operation="search",
-        filters=[
-            QueryFilter(field="project_code", operator="eq", value=project),
-            QueryFilter(field="license_type", operator="eq", value=license_type),
-        ],
-        return_fields=["license_type", *return_fields],
-        limit=20,
-    )
+def query_plan_from_model_intent(
+    intent: dict[str, Any],
+    catalog: QueryCatalog,
+) -> QueryPlan | None:
+    """Normalize a server-side model intent into a constrained QueryPlan.
 
-
-def build_query_plan_from_question(question: str) -> QueryPlan | None:
-    normalized = question.strip().replace(" ", "")
-    if not normalized or "所有项目资料" in normalized:
-        return None
-
-    match = re.search(r"(.+?)的商标(?:在哪家公司|权利人是谁|权利人是什么)[？?]?$", normalized, re.IGNORECASE)
-    if match:
-        return _project_scoped_license_plan(
-            match.group(1),
-            license_type="trademark_right",
-            return_fields=["rights_holder"],
-        )
-
-    match = re.search(r"(.+?)是哪些项目的法务BP", normalized, re.IGNORECASE)
-    if match:
-        return QueryPlan(
-            domain="project",
-            operation="search",
-            filters=[QueryFilter(field="legal_bp", operator="eq", value=match.group(1))],
-            return_fields=["project_code", "name"],
-            limit=50,
-        )
-
-    match = re.search(r"哪些合同.*相对方包含(.+?)[？?]?$", normalized)
-    if match:
-        return QueryPlan(
-            domain="contract",
-            operation="search",
-            filters=[
-                QueryFilter(field="counterparty", operator="contains", value=match.group(1))
-            ],
-            return_fields=["contract_number", "title", "counterparty"],
-            limit=50,
-        )
-
-    match = re.search(r"(.+?)是哪些资质的实际运营方", normalized)
-    if match:
-        return QueryPlan(
-            domain="license",
-            operation="search",
-            filters=[
-                QueryFilter(field="actual_operator", operator="eq", value=match.group(1))
-            ],
-            return_fields=["license_type", "actual_operator"],
-            limit=50,
-        )
-
-    match = re.search(r"(.+?)关联哪些资料", normalized)
-    if match:
-        return QueryPlan(
-            domain="cross_domain",
-            operation="search",
-            filters=[QueryFilter(field="q", operator="contains", value=match.group(1))],
-            return_fields=[
-                "project_code",
-                "name",
-                "contract_number",
-                "title",
-                "license_type",
-                "actual_operator",
-            ],
-            limit=50,
-        )
-
-    match = re.search(r"(.+?)的官网是什么", normalized)
-    if match:
-        return QueryPlan(
-            domain="project",
-            operation="lookup",
-            filters=[QueryFilter(field="project_code", operator="eq", value=match.group(1))],
-            return_fields=["project_code", "name", "website"],
-            limit=1,
-        )
-
-    return None
-
-
-def query_plan_from_model_intent(intent: dict[str, Any]) -> QueryPlan | None:
+    Tolerant by design: the model may return filters as a list of
+    ``{field, operator, value}`` objects OR as a flat ``{field: value}`` mapping,
+    may use operation synonyms (``read``/``get``/``select`` ...), and may use
+    Chinese or alias field names. Anything that cannot be recovered to a
+    registered field is kept as-is so the catalog validator can report it,
+    rather than silently dropping it. Returns ``None`` only when the domain is
+    not a registered domain.
+    """
     domain = intent.get("domain")
-    operation = intent.get("operation")
-    raw_filters = intent.get("filters")
-    raw_return_fields = intent.get("return_fields")
-    raw_limit = intent.get("limit", 20)
-    if not isinstance(domain, str) or not isinstance(operation, str):
+    if not isinstance(domain, str) or domain not in catalog.domains:
         return None
-    if not isinstance(raw_filters, list) or not isinstance(raw_return_fields, list):
-        return None
-    if not all(isinstance(field, str) for field in raw_return_fields):
-        return None
-    limit = raw_limit if isinstance(raw_limit, int) else 20
-    filters: list[QueryFilter] = []
-    for raw_filter in raw_filters:
-        if not isinstance(raw_filter, dict):
-            return None
-        field = raw_filter.get("field")
-        operator = raw_filter.get("operator")
-        if not isinstance(field, str) or not isinstance(operator, str):
-            return None
-        filters.append(QueryFilter(field=field, operator=operator, value=raw_filter.get("value")))
+
+    filters = _normalize_filters(intent.get("filters"), domain, catalog)
+    return_fields = _normalize_return_fields(intent.get("return_fields"), domain, catalog)
+    if not return_fields and domain != "cross_domain":
+        domain_catalog = catalog.domains.get(domain)
+        if domain_catalog is not None:
+            return_fields = sorted(domain_catalog.identity_fields) or sorted(domain_catalog.fields)[:1]
+
     return QueryPlan(
         domain=domain,
-        operation=operation,
+        operation=_normalize_operation(intent.get("operation")),
         filters=filters,
-        return_fields=raw_return_fields,
-        limit=limit,
+        return_fields=return_fields,
+        limit=_normalize_limit(intent.get("limit")),
     )
+
+
+def _normalize_operation(raw: Any) -> str:
+    # Execution dispatches on domain, not operation, so an unrecognized
+    # operation (e.g. the model's "read") safely normalizes to "search".
+    if isinstance(raw, str) and raw.strip().lower() in SUPPORTED_OPERATIONS:
+        return raw.strip().lower()
+    return "search"
+
+
+def _normalize_limit(raw: Any) -> int:
+    if isinstance(raw, bool):
+        return 20
+    if isinstance(raw, int):
+        limit = raw
+    else:
+        try:
+            limit = int(raw)
+        except (TypeError, ValueError):
+            return 20
+    return max(0, min(limit, 100))
+
+
+def _normalize_filters(raw: Any, domain: str, catalog: QueryCatalog) -> list[QueryFilter]:
+    filters: list[QueryFilter] = []
+    if isinstance(raw, dict):
+        # Flat {field: value} mapping -> eq filters.
+        for key, value in raw.items():
+            if not isinstance(key, str):
+                continue
+            field = catalog.resolve_field(domain, key) or key
+            filters.append(QueryFilter(field=field, operator="eq", value=value))
+        return filters
+    if isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            field = item.get("field")
+            if not isinstance(field, str) or not field.strip():
+                continue
+            resolved = catalog.resolve_field(domain, field) or field
+            operator = item.get("operator")
+            if not isinstance(operator, str) or operator not in SUPPORTED_OPERATORS:
+                operator = "eq"
+            filters.append(QueryFilter(field=resolved, operator=operator, value=item.get("value")))
+        return filters
+    return filters
+
+
+def _normalize_return_fields(raw: Any, domain: str, catalog: QueryCatalog) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    fields: list[str] = []
+    for entry in raw:
+        if not isinstance(entry, str) or not entry.strip():
+            continue
+        fields.append(catalog.resolve_field(domain, entry) or entry)
+    return fields
 
 
 def validate_agent_decision(decision: AgentToolDecision) -> dict[str, Any]:

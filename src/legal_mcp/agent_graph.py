@@ -10,17 +10,15 @@ from typing import Any, TypedDict
 from legal_mcp import db
 from legal_mcp.agent_observability import build_trace_metadata, flush_langfuse, langfuse_callbacks
 from legal_mcp.agent_router import (
-    build_query_plan_from_question,
     clarify_result,
     query_plan_from_model_intent,
 )
 from legal_mcp.audit import DEFAULT_AUDIT_PATH
 from legal_mcp.ai_provider import AIMessage, AIProvider
-from legal_mcp.planner import asks_for_access_scope
 from legal_mcp.policy import AccessContext
 from legal_mcp.query_authorization import authorize_query_plan
 from legal_mcp.query_catalog import QueryCatalog, build_query_catalog, catalog_context_for_prompt
-from legal_mcp.query_plan import QueryFilter, QueryPlan, validate_query_plan
+from legal_mcp.query_plan import QueryFilter, QueryPlan
 from legal_mcp.search_tools import execute_search_plan
 from legal_mcp.tools_access import describe_my_access
 
@@ -35,6 +33,7 @@ class AgentState(TypedDict, total=False):
     error: dict[str, Any]
     tool_calls: list[dict[str, Any]]
     model_intent: dict[str, Any]
+    clarify_reason: str
 
 
 def run_agent_query(
@@ -196,7 +195,7 @@ def _build_langgraph(
     )
     workflow.add_node("normalize_query", normalize_query)
     workflow.add_node("build_query_plan", build_query_plan)
-    workflow.add_node("validate_plan", validate_plan)
+    workflow.add_node("validate_plan", lambda state: validate_plan(state, database_path))
     workflow.add_node(
         "authorize_plan",
         lambda state: authorize_plan(state, database_path, access_context),
@@ -249,7 +248,7 @@ def _run_linear_graph(
             ("classify_question", lambda: classify_question(state, database_path, ai_provider)),
             ("normalize_query", lambda: normalize_query(state)),
             ("build_query_plan", lambda: build_query_plan(state)),
-            ("validate_plan", lambda: validate_plan(state)),
+            ("validate_plan", lambda: validate_plan(state, database_path)),
             ("authorize_plan", lambda: authorize_plan(state, database_path, access_context)),
             ("execute_plan", lambda: execute_plan(state, database_path, audit_path, access_context)),
             ("format_answer", lambda: format_answer(state)),
@@ -279,24 +278,35 @@ def classify_question(
     database_path: str | Path,
     ai_provider: AIProvider | None = None,
 ) -> dict[str, Any]:
+    # A pre-supplied plan (structured_query) skips natural-language planning.
     if state.get("query_plan") is not None:
         return {"query_type": "search"}
-    if asks_for_access_scope(state["question"]):
-        return {"query_type": "access"}
 
     catalog = _catalog_for_database(database_path)
     model_intent = _model_intent(state["question"], ai_provider, catalog)
-    plan = query_plan_from_model_intent(model_intent) if model_intent else None
-    if plan is not None:
-        catalog_validation = catalog.validate_plan(plan)
-        if catalog_validation.ok:
-            return {"query_type": "search", "query_plan": plan, "model_intent": model_intent}
 
-    fallback_plan = build_query_plan_from_question(state["question"])
-    if fallback_plan is None:
-        update: dict[str, Any] = {"query_type": "clarify"}
-    else:
-        update = {"query_type": "search", "query_plan": fallback_plan}
+    if model_intent.get("intent") == "access":
+        return {"query_type": "access", "model_intent": model_intent}
+    if model_intent.get("intent") == "clarify":
+        return {
+            "query_type": "clarify",
+            "model_intent": model_intent,
+            "clarify_reason": "model could not map the question to authorized fields",
+        }
+
+    plan = query_plan_from_model_intent(model_intent, catalog) if model_intent else None
+    if plan is not None:
+        validation = catalog.validate_plan(plan)
+        if validation.ok:
+            return {"query_type": "search", "query_plan": plan, "model_intent": model_intent}
+        return {
+            "query_type": "clarify",
+            "model_intent": model_intent,
+            "clarify_reason": validation.message or validation.error_code or "invalid plan",
+        }
+
+    reason = "server AI is unavailable" if not model_intent else "model did not return a usable plan"
+    update: dict[str, Any] = {"query_type": "clarify", "clarify_reason": reason}
     if model_intent:
         update["model_intent"] = model_intent
     return update
@@ -318,27 +328,63 @@ def _model_intent(
     if ai_provider is None:
         return {}
     messages = [
-        AIMessage(
-            role="system",
-            content=(
-                "You are the server-side Legal-MCP query planner. Convert the user question "
-                "to one JSON object with keys domain, operation, filters, return_fields, "
-                "and optional limit. Use only fields and domains in this catalog. Use "
-                "relationship_filter_fields for project-scoped child records. Never output "
-                "SQL, tool names, connection handles, prose, markdown, or extra keys. "
-                f"Catalog: {catalog_context_for_prompt(catalog)}"
-            ),
-        ),
+        AIMessage(role="system", content=_planner_system_prompt(catalog)),
         AIMessage(role="user", content=question),
     ]
     # A server-side AI outage or malformed reply must not break agent_query;
-    # fall back to deterministic planning instead of propagating the error.
+    # an empty intent makes the graph clarify instead of propagating the error.
     try:
         response = ai_provider.complete(messages)
-        parsed = json.loads(response.content)
     except Exception:
         return {}
+    parsed = _parse_json_object(response.content)
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _planner_system_prompt(catalog: QueryCatalog) -> str:
+    return (
+        "You are the Legal-MCP server-side query planner. Read the user question and the "
+        "catalog, then return exactly one JSON object and nothing else.\n"
+        "Return one of these shapes:\n"
+        '  1. A data plan: {"domain": <a key of catalog.domains>, "operation": "search", '
+        '"filters": [{"field": <field>, "operator": <one of supported_operators>, '
+        '"value": <value>}], "return_fields": [<field>, ...], "limit": <int 1-100>}.\n'
+        '  2. {"intent": "access"} if the user asks which projects or fields they can access.\n'
+        '  3. {"intent": "clarify"} if the question is ambiguous or references a field that is '
+        "not in the catalog.\n"
+        "Rules: use only domains and canonical English field names found under catalog.domains. "
+        "'filters' MUST be a JSON array of filter objects, never a bare mapping. Resolve any "
+        "Chinese or alias name to its canonical field using field_aliases. Use domain "
+        "'cross_domain' with a single {field:'q',operator:'contains'} filter for free-text "
+        "searches that span domains. Never output SQL, table names, tool names, prose, or markdown.\n"
+        "Example: question '指间山海的发行团队是谁' -> "
+        '{"domain": "project", "operation": "search", '
+        '"filters": [{"field": "name", "operator": "eq", "value": "指间山海"}], '
+        '"return_fields": ["release_team"], "limit": 1}\n'
+        f"Catalog: {catalog_context_for_prompt(catalog)}"
+    )
+
+
+def _parse_json_object(content: str) -> dict[str, Any] | None:
+    try:
+        parsed = json.loads(content)
+    except (json.JSONDecodeError, TypeError):
+        parsed = _extract_json_object(content)
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _extract_json_object(content: str) -> dict[str, Any] | None:
+    if not isinstance(content, str):
+        return None
+    start = content.find("{")
+    end = content.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        return None
+    try:
+        parsed = json.loads(content[start : end + 1])
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def normalize_query(state: AgentState) -> dict[str, Any]:
@@ -346,21 +392,17 @@ def normalize_query(state: AgentState) -> dict[str, Any]:
 
 
 def build_query_plan(state: AgentState) -> dict[str, Any]:
-    if state.get("query_type") != "search":
-        return {}
-    if state.get("query_plan") is not None:
-        return {}
-    plan = build_query_plan_from_question(state["normalized_question"])
-    if plan is None:
-        return {"query_type": "clarify"}
-    return {"query_plan": plan}
+    # Planning happens in classify_question (model-driven) or is supplied by
+    # structured_query. This node is retained for graph-topology stability.
+    return {}
 
 
-def validate_plan(state: AgentState) -> dict[str, Any]:
+def validate_plan(state: AgentState, database_path: str | Path) -> dict[str, Any]:
     plan = state.get("query_plan")
     if plan is None or state.get("query_type") != "search":
         return {}
-    result = validate_query_plan(plan)
+    catalog = _catalog_for_database(database_path)
+    result = catalog.validate_plan(plan)
     if result.ok:
         return {}
     return {
@@ -414,12 +456,13 @@ def execute_plan(
         return {}
     query_type = state.get("query_type")
     if query_type == "clarify":
+        reason = state.get("clarify_reason") or "question needs a narrower retrieval scope"
         return {
             "tool_result": clarify_result(state["question"]),
             "tool_calls": [
                 {
                     "tool_name": "clarify_query",
-                    "reason": "question needs a narrower retrieval scope",
+                    "reason": reason,
                     "status": "success",
                 }
             ],
@@ -517,10 +560,18 @@ def _record_agent_run(
 ) -> None:
     tool_calls = result.get("tool_calls") or []
     selected_tool = None
+    first_call: dict[str, Any] = {}
     if tool_calls and isinstance(tool_calls[0], dict):
-        selected_tool = tool_calls[0].get("tool_name")
+        first_call = tool_calls[0]
+        selected_tool = first_call.get("tool_name")
     error = result.get("error")
     error_code = error.get("code") if isinstance(error, dict) else None
+    # A clarify is recorded as success; capture WHY in error_code so operators
+    # can diagnose why a question did not retrieve data (reuses existing column).
+    if error_code is None and selected_tool == "clarify_query":
+        reason = first_call.get("reason")
+        if isinstance(reason, str) and reason:
+            error_code = f"clarify:{reason}"[:200]
     conn = db.connect(database_path)
     try:
         conn.execute(

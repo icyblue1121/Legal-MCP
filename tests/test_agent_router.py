@@ -1,11 +1,24 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+from legal_mcp import db
 from legal_mcp.agent_router import (
-    build_query_plan_from_question,
     query_plan_from_model_intent,
     route_question,
     validate_agent_decision,
 )
+from legal_mcp.query_catalog import build_query_catalog
+
+
+def _catalog(tmp_path: Path):
+    database_path = tmp_path / "legal.db"
+    db.initialize_database(database_path)
+    conn = db.connect(database_path)
+    try:
+        return build_query_catalog(conn)
+    finally:
+        conn.close()
 
 
 def test_route_question_uses_existing_planner_for_project_field_question() -> None:
@@ -42,46 +55,7 @@ def test_validate_agent_decision_rejects_fields_outside_capability() -> None:
     assert result["error"]["code"] == "agent_field_not_allowed"
 
 
-def test_build_query_plan_for_legal_bp_project_search() -> None:
-    plan = build_query_plan_from_question("张三是哪些项目的法务BP？")
-
-    assert plan is not None
-    assert plan.domain == "project"
-    assert plan.operation == "search"
-    assert [(query_filter.field, query_filter.operator, query_filter.value) for query_filter in plan.filters] == [
-        ("legal_bp", "eq", "张三")
-    ]
-
-
-def test_build_query_plan_for_contract_counterparty_search() -> None:
-    plan = build_query_plan_from_question("哪些合同的相对方包含腾讯？")
-
-    assert plan is not None
-    assert plan.domain == "contract"
-    assert plan.filters[0].field == "counterparty"
-    assert plan.filters[0].operator == "contains"
-    assert plan.filters[0].value == "腾讯"
-
-
-def test_build_query_plan_for_license_actual_operator_search() -> None:
-    plan = build_query_plan_from_question("某公司是哪些资质的实际运营方？")
-
-    assert plan is not None
-    assert plan.domain == "license"
-    assert plan.filters[0].field == "actual_operator"
-    assert plan.filters[0].value == "某公司"
-
-
-def test_build_query_plan_for_cross_domain_search() -> None:
-    plan = build_query_plan_from_question("张三关联哪些资料？")
-
-    assert plan is not None
-    assert plan.domain == "cross_domain"
-    assert plan.filters[0].field == "q"
-    assert plan.filters[0].value == "张三"
-
-
-def test_query_plan_from_model_intent_accepts_valid_catalog_plan() -> None:
+def test_query_plan_from_model_intent_accepts_valid_catalog_plan(tmp_path: Path) -> None:
     plan = query_plan_from_model_intent(
         {
             "domain": "license",
@@ -92,7 +66,8 @@ def test_query_plan_from_model_intent_accepts_valid_catalog_plan() -> None:
             ],
             "return_fields": ["license_type", "rights_holder"],
             "limit": 20,
-        }
+        },
+        _catalog(tmp_path),
     )
 
     assert plan is not None
@@ -100,14 +75,65 @@ def test_query_plan_from_model_intent_accepts_valid_catalog_plan() -> None:
     assert plan.return_fields == ["license_type", "rights_holder"]
 
 
-def test_query_plan_from_model_intent_rejects_non_json_shape() -> None:
+def test_query_plan_from_model_intent_recovers_dict_filters_and_operation(tmp_path: Path) -> None:
+    # Regression for the production bug: the model returned filters as an object
+    # and operation "read", which the old strict parser rejected (-> clarify).
     plan = query_plan_from_model_intent(
         {
-            "domain": "license",
+            "domain": "project",
+            "operation": "read",
+            "filters": {"name": "指间山海"},
+            "return_fields": ["release_team"],
+        },
+        _catalog(tmp_path),
+    )
+
+    assert plan is not None
+    assert plan.domain == "project"
+    assert plan.operation == "search"
+    assert [(f.field, f.operator, f.value) for f in plan.filters] == [("name", "eq", "指间山海")]
+    assert plan.return_fields == ["release_team"]
+
+
+def test_query_plan_from_model_intent_resolves_aliases(tmp_path: Path) -> None:
+    plan = query_plan_from_model_intent(
+        {
+            "domain": "project",
             "operation": "search",
-            "filters": "project_code = Mgame",
-            "return_fields": ["rights_holder"],
-        }
+            "filters": [{"field": "项目名称", "operator": "eq", "value": "失序之地"}],
+            "return_fields": ["法务BP"],
+        },
+        _catalog(tmp_path),
+    )
+
+    assert plan is not None
+    assert plan.filters[0].field == "name"
+    assert plan.return_fields == ["legal_bp"]
+
+
+def test_query_plan_from_model_intent_clamps_limit_and_backfills_returns(tmp_path: Path) -> None:
+    plan = query_plan_from_model_intent(
+        {
+            "domain": "project",
+            "operation": "search",
+            "filters": [{"field": "name", "operator": "eq", "value": "X"}],
+            "return_fields": [],
+            "limit": 9999,
+        },
+        _catalog(tmp_path),
+    )
+
+    assert plan is not None
+    assert plan.limit == 100
+    # Empty return fields backfill to identity fields so the SELECT is valid.
+    assert set(plan.return_fields) <= {"project_code", "name"}
+    assert plan.return_fields
+
+
+def test_query_plan_from_model_intent_returns_none_for_unregistered_domain(tmp_path: Path) -> None:
+    plan = query_plan_from_model_intent(
+        {"domain": "sqlite_master", "operation": "search", "filters": [], "return_fields": ["sql"]},
+        _catalog(tmp_path),
     )
 
     assert plan is None

@@ -42,15 +42,33 @@ class OpenAICompatibleProvider:
         except ImportError as exc:
             raise RuntimeError("langchain-openai is required for openai-compatible AI") from exc
 
+        # temperature=0 for deterministic plans; response_format json_object asks
+        # OpenAI-compatible providers (incl. DeepSeek) for a bare JSON object so
+        # the planner does not have to parse prose or markdown fences.
         chat = ChatOpenAI(
             api_key=self.api_key,
             model=self.model,
             base_url=self.base_url,
+            temperature=0,
+            model_kwargs={"response_format": {"type": "json_object"}},
         )
         response = chat.invoke(
             [{"role": message.role, "content": message.content} for message in messages]
         )
-        return AIMessage(role="assistant", content=str(response.content))
+        return AIMessage(role="assistant", content=_strip_code_fence(str(response.content)))
+
+
+def _strip_code_fence(content: str) -> str:
+    """Remove a surrounding markdown code fence if the model added one."""
+    text = content.strip()
+    if not text.startswith("```"):
+        return text
+    lines = text.splitlines()
+    if lines and lines[0].startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
 
 
 def provider_from_config(config: AgentConfig) -> AIProvider | None:
