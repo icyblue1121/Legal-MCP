@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
 from unittest.mock import patch
 
-from legal_mcp.proxy import forward_message
+from legal_mcp.proxy import forward_message, proxy_stdio
 
 
 class _FakeResponse:
@@ -60,3 +61,19 @@ def test_forward_message_preserves_json_rpc_error_payload() -> None:
         )
 
     assert response["error"]["code"] == -32601
+
+
+def test_proxy_stdio_does_not_write_empty_http_response_for_notification() -> None:
+    notification = {"jsonrpc": "2.0", "method": "notifications/initialized"}
+    stdin = BytesIO(json.dumps(notification).encode("utf-8") + b"\n")
+    stdout = BytesIO()
+
+    with patch("legal_mcp.proxy.forward_message", return_value={}):
+        proxy_stdio(
+            url="http://legal.internal:8765/mcp",
+            token="secret-token",
+            stdin=stdin,
+            stdout=stdout,
+        )
+
+    assert stdout.getvalue() == b""

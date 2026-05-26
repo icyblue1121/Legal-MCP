@@ -46,6 +46,6 @@ def proxy_stdio(
             return
         message, framing = read_result
         response = forward_message(message, url=url, token=token, timeout=timeout)
-        if response is not None:
+        if response:
             _write_message(stdout, response, framing)
             stdout.flush()
