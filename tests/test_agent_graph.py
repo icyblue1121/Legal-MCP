@@ -215,4 +215,26 @@ def test_agent_graph_uses_server_ai_catalog_plan_for_non_regex_question(tmp_path
     serialized_messages = "\n".join(message.content for message in provider.messages)
     assert "rights_holder" in serialized_messages
     assert "get_project_fields" not in serialized_messages
-    assert "get_project_fields" not in serialized_messages
+
+
+def test_agent_graph_answers_project_trademark_rights_holder_without_client_tool_access(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "legal.db"
+    _database_with_project(database_path)
+
+    result = run_agent_query(
+        question="Mgame 的商标在哪家公司",
+        database_path=database_path,
+        checkpoint_path=tmp_path / "agent-checkpoints.sqlite",
+        audit_path=tmp_path / "audit.jsonl",
+        thread_id="pytest-trademark-thread",
+    )
+
+    assert result["status"] == "success"
+    assert result["tool_calls"][0]["tool_name"] == "license/search"
+    assert result["tool_calls"][0]["plan"]["filters"] == [
+        {"field": "project_code", "operator": "eq", "value": "Mgame"},
+        {"field": "license_type", "operator": "eq", "value": "trademark_right"},
+    ]
+    assert "上海游碧曜网络科技有限公司" in result["answer"]

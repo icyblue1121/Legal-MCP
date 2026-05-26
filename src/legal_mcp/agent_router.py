@@ -31,10 +31,36 @@ def route_question(question: str) -> AgentToolDecision:
     )
 
 
+def _project_scoped_license_plan(
+    project: str,
+    *,
+    license_type: str,
+    return_fields: list[str],
+) -> QueryPlan:
+    return QueryPlan(
+        domain="license",
+        operation="search",
+        filters=[
+            QueryFilter(field="project_code", operator="eq", value=project),
+            QueryFilter(field="license_type", operator="eq", value=license_type),
+        ],
+        return_fields=["license_type", *return_fields],
+        limit=20,
+    )
+
+
 def build_query_plan_from_question(question: str) -> QueryPlan | None:
     normalized = question.strip().replace(" ", "")
     if not normalized or "所有项目资料" in normalized:
         return None
+
+    match = re.search(r"(.+?)的商标(?:在哪家公司|权利人是谁|权利人是什么)[？?]?$", normalized, re.IGNORECASE)
+    if match:
+        return _project_scoped_license_plan(
+            match.group(1),
+            license_type="trademark_right",
+            return_fields=["rights_holder"],
+        )
 
     match = re.search(r"(.+?)是哪些项目的法务BP", normalized, re.IGNORECASE)
     if match:
