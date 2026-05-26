@@ -123,8 +123,11 @@ def call_tool(
                 if not isinstance(question, str) or not question.strip():
                     result = _error("validation_error", "question is required")
                 else:
+                    from legal_mcp.agent_config import load_agent_config
                     from legal_mcp.agent_graph import run_agent_query
+                    from legal_mcp.ai_provider import provider_from_config
 
+                    ai_provider = provider_from_config(load_agent_config(database_path))
                     thread_id = arguments.get("thread_id")
                     result = run_agent_query(
                         question=question,
@@ -132,6 +135,7 @@ def call_tool(
                         audit_path=audit_path,
                         access_context=access_context,
                         thread_id=thread_id if isinstance(thread_id, str) else None,
+                        ai_provider=ai_provider,
                     )
                     _append_graph_result_disclosures(conn, result, disclosures)
             elif tool_name == "structured_query":

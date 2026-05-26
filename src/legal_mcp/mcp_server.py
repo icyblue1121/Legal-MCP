@@ -54,7 +54,7 @@ def serve(
 ) -> None:
     require_startup_checks(database_path, remote_url=update_check_url)
     resolved_public_agent_only = (
-        load_agent_config().public_agent_only
+        load_agent_config(database_path).public_agent_only
         if public_agent_only is None
         else public_agent_only
     )

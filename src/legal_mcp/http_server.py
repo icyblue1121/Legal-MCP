@@ -35,7 +35,7 @@ class LegalMCPHTTPServer(ThreadingHTTPServer):
         self.bearer_token = bearer_token
         self.allowed_origins = allowed_origins
         self.public_agent_only = (
-            load_agent_config().public_agent_only
+            load_agent_config(database_path).public_agent_only
             if public_agent_only is None
             else public_agent_only
         )
